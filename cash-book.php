@@ -53,31 +53,46 @@ $filterCust = $_GET['customer'] ?? '';
 
 $today = getTodayDate();
 
-if ($filterFrom !== '' && $filterTo !== '') {
+$summarySQL = "SELECT
+    COALESCE(SUM(CASE WHEN entry_type IN ('cash_in','adjustment_in') THEN amount ELSE 0 END), 0) as total_in,
+    COALESCE(SUM(CASE WHEN entry_type IN ('cash_out','adjustment_out') THEN amount ELSE 0 END), 0) as total_out,
+    COUNT(*) as total_entries
+    FROM cash_entries";
+$summaryWhere = [];
+$summaryParams = [];
+
+if ($filterFrom !== '') {
+    $summaryWhere[] = "entry_date >= ?";
+    $summaryParams[] = $filterFrom;
+}
+if ($filterTo !== '') {
+    $summaryWhere[] = "entry_date <= ?";
+    $summaryParams[] = $filterTo;
+}
+if ($filterCust !== '') {
+    $summaryWhere[] = "customer_name LIKE ?";
+    $summaryParams[] = "%$filterCust%";
+}
+
+$summarySQL .= !empty($summaryWhere) ? ' WHERE ' . implode(' AND ', $summaryWhere) : '';
+$stmtF = $pdo->prepare($summarySQL);
+$stmtF->execute($summaryParams);
+$summary = $stmtF->fetch();
+
+// Opening balance based on filter scope
+if ($filterFrom !== '') {
     $periodOpening = getOpeningBalance($filterFrom);
-    $stmtF = $pdo->prepare("SELECT
-        COALESCE(SUM(CASE WHEN entry_type IN ('cash_in','adjustment_in') THEN amount ELSE 0 END), 0) as total_in,
-        COALESCE(SUM(CASE WHEN entry_type IN ('cash_out','adjustment_out') THEN amount ELSE 0 END), 0) as total_out,
-        COUNT(*) as total_entries
-        FROM cash_entries WHERE entry_date BETWEEN ? AND ?");
-    $stmtF->execute([$filterFrom, $filterTo]);
-    $summary = $stmtF->fetch();
-    $periodClosing = $periodOpening + $summary['total_in'] - $summary['total_out'];
 } elseif ($filterCust !== '') {
     $periodOpening = getOpeningBalance($today);
-    $stmtF = $pdo->prepare("SELECT
-        COALESCE(SUM(CASE WHEN entry_type IN ('cash_in','adjustment_in') THEN amount ELSE 0 END), 0) as total_in,
-        COALESCE(SUM(CASE WHEN entry_type IN ('cash_out','adjustment_out') THEN amount ELSE 0 END), 0) as total_out,
-        COUNT(*) as total_entries
-        FROM cash_entries WHERE customer_name LIKE ?");
-    $stmtF->execute(["%$filterCust%"]);
-    $summary = $stmtF->fetch();
-    $periodClosing = $periodOpening + $summary['total_in'] - $summary['total_out'];
+} elseif ($summary['total_entries'] > 0) {
+    $firstDateStmt = $pdo->prepare("SELECT MIN(entry_date) as first_date FROM cash_entries" . (!empty($summaryWhere) ? ' WHERE ' . implode(' AND ', $summaryWhere) : ''));
+    $firstDateStmt->execute($summaryParams);
+    $firstDateRow = $firstDateStmt->fetch();
+    $periodOpening = getOpeningBalance($firstDateRow['first_date']);
 } else {
-    $summary = getTodaySummary($today);
-    $periodOpening = getOpeningBalance($today);
-    $periodClosing = getClosingBalance($today);
+    $periodOpening = 0;
 }
+$periodClosing = $periodOpening + $summary['total_in'] - $summary['total_out'];
 
 // Fetch entries (chronological ASC for running balance)
 $entriesSQL = "SELECT * FROM cash_entries WHERE 1=1";
@@ -90,13 +105,7 @@ $stmt = $pdo->prepare($entriesSQL);
 $stmt->execute($params);
 $allEntries = $stmt->fetchAll();
 
-if ($filterFrom !== '') {
-    $runningBalance = getOpeningBalance($filterFrom);
-} elseif ($filterCust !== '') {
-    $runningBalance = getOpeningBalance($today);
-} else {
-    $runningBalance = getOpeningBalance($today);
-}
+$runningBalance = $periodOpening;
 foreach ($allEntries as &$entry) {
     if (in_array($entry['entry_type'], ['cash_in', 'adjustment_in'])) {
         $runningBalance += $entry['amount'];
@@ -115,18 +124,25 @@ require_once __DIR__ . '/includes/header.php';
 ?>
 
 <div class="content-wrapper">
+    <?php
+        $printParams = [];
+        if ($filterFrom !== '') { $printParams['from'] = $filterFrom; }
+        if ($filterTo !== '') { $printParams['to'] = $filterTo; }
+        if ($filterCust !== '') { $printParams['customer'] = $filterCust; }
+        $printQuery = http_build_query($printParams);
+    ?>
     <div class="page-header">
-        <h2><i class="bi bi-journal-bookmark"></i> Cash Book</h2>
-        <?php
-            $printParams = [];
-            $printParams['from'] = $filterFrom ?: $today;
-            $printParams['to'] = $filterTo ?: $today;
-            if ($filterCust !== '') { $printParams['customer'] = $filterCust; }
-            $printQuery = http_build_query($printParams);
-        ?>
-        <a href="print-cashbook.php?<?= $printQuery ?>" class="btn btn-print btn-sm" target="_blank">
-            <i class="bi bi-printer"></i> Print
-        </a>
+        <h2 style="width:100%;">
+            <i class="bi bi-journal-bookmark"></i> Cash Book
+            <span style="margin-left:auto; display:flex; gap:6px;">
+                <a href="index.php" class="btn btn-outline-primary btn-sm" style="flex-shrink:0;">
+                    <i class="bi bi-speedometer2"></i> Dashboard
+                </a>
+                <a href="print-cashbook.php?<?= $printQuery ?>" class="btn btn-print btn-sm" style="flex-shrink:0;" target="_blank">
+                    <i class="bi bi-printer"></i> Print
+                </a>
+            </span>
+        </h2>
     </div>
 
     <!-- Entry Form -->
@@ -196,54 +212,6 @@ require_once __DIR__ . '/includes/header.php';
         </div>
     </div>
 
-    <!-- Summary -->
-    <div class="row g-2 mb-4">
-        <div class="col-xl-3 col-md-6">
-            <div class="stat-card opening">
-                <div class="d-flex justify-content-between align-items-start">
-                    <div>
-                        <div class="label">Opening Balance</div>
-                        <div class="value" style="font-size:1.1rem;"><?= formatCurrency($periodOpening) ?></div>
-                    </div>
-                    <div class="icon yellow"><i class="bi bi-sunrise"></i></div>
-                </div>
-            </div>
-        </div>
-        <div class="col-xl-3 col-md-6">
-            <div class="stat-card cash-in">
-                <div class="d-flex justify-content-between align-items-start">
-                    <div>
-                        <div class="label">Total Cash In</div>
-                        <div class="value amount-in" style="font-size:1.1rem;"><?= formatCurrency($summary['total_in']) ?></div>
-                    </div>
-                    <div class="icon green"><i class="bi bi-arrow-down-circle"></i></div>
-                </div>
-            </div>
-        </div>
-        <div class="col-xl-3 col-md-6">
-            <div class="stat-card cash-out">
-                <div class="d-flex justify-content-between align-items-start">
-                    <div>
-                        <div class="label">Total Cash Out</div>
-                        <div class="value amount-out" style="font-size:1.1rem;"><?= formatCurrency($summary['total_out']) ?></div>
-                    </div>
-                    <div class="icon red"><i class="bi bi-arrow-up-circle"></i></div>
-                </div>
-            </div>
-        </div>
-        <div class="col-xl-3 col-md-6">
-            <div class="stat-card balance">
-                <div class="d-flex justify-content-between align-items-start">
-                    <div>
-                        <div class="label">Closing Balance</div>
-                        <div class="value" style="color:#2e86c1;font-size:1.1rem;"><?= formatCurrency($periodClosing) ?></div>
-                    </div>
-                    <div class="icon blue"><i class="bi bi-wallet2"></i></div>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <!-- Filter + Entries -->
     <div class="card-custom">
         <div class="card-header"><i class="bi bi-funnel"></i> Filters & Entries</div>
@@ -277,6 +245,15 @@ require_once __DIR__ . '/includes/header.php';
                 <p>No entries found</p>
             </div>
             <?php else: ?>
+
+            <?php $netTotal = $summary['total_in'] - $summary['total_out']; ?>
+            <div class="d-flex justify-content-between align-items-center mb-2 py-2 px-3" style="background:#f0f2f5; border-radius:8px; font-size:0.95rem; flex-wrap:wrap; gap:4px;">
+                <span style="font-weight:600;">Opening: <?= formatCurrency($periodOpening) ?></span>
+                <span style="font-weight:600;">Entries: <?= $summary['total_entries'] ?></span>
+                <span style="font-weight:700; color:#1a5276;">
+                    Total Amount: <?= $netTotal >= 0 ? '+' : '-' ?><?= formatCurrency(abs($netTotal)) ?>
+                </span>
+            </div>
 
             <!-- Desktop Table -->
             <div class="desktop-table table-responsive">

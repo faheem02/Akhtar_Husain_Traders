@@ -39,6 +39,10 @@ $summary = $summaryStmt->fetch();
 $periodOpening = 0;
 if (!empty($filterDateFrom)) {
     $periodOpening = getOpeningBalance($filterDateFrom);
+} elseif (!empty($filterCustomer)) {
+    $periodOpening = getOpeningBalance(getTodayDate());
+} elseif (!empty($entries)) {
+    $periodOpening = getOpeningBalance($entries[0]['entry_date']);
 }
 
 $runningBalance = $periodOpening;
@@ -107,21 +111,16 @@ $companyAddress = getSetting('company_address');
             <?php endif; ?>
         </div>
 
-        <?php if (!empty($filterDateFrom)): ?>
-        <table style="width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.9rem;">
-            <tr style="background: #f8eaa6; border: 1px solid #d4ac0d;">
-                <td colspan="6" style="padding: 8px 10px; font-weight: 700; color: #7d6608;">
-                    Opening Balance: <?= formatCurrency($periodOpening) ?>
-                </td>
-                <td style="padding: 8px 10px; font-weight: 800; text-align: right; color: #7d6608;">
-                    <?= formatCurrency($periodOpening) ?>
-                </td>
-            </tr>
-        </table>
-        <?php endif; ?>
-
         <?php if (!empty($entries)): ?>
-        <table style="width: 100%; border-collapse: collapse; margin-top: 2px;">
+        <?php $netTotal = $summary['total_in'] - $summary['total_out']; ?>
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:#f0f2f5; border-radius:6px; margin-top:6px; font-size:0.9rem; flex-wrap:wrap; gap:4px;">
+            <span style="font-weight:600;">Opening: <?= formatCurrency($periodOpening) ?></span>
+            <span style="font-weight:600;">Entries: <?= $summary['total_entries'] ?></span>
+            <span style="font-weight:700; color:#1a5276;">
+                Total Amount: <?= $netTotal >= 0 ? '+' : '-' ?><?= formatCurrency(abs($netTotal)) ?>
+            </span>
+        </div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 6px;">
             <thead>
                 <tr style="background: #1a5276; color: #fff;">
                     <th style="padding: 8px 10px; text-align: center;">#</th>
@@ -160,18 +159,6 @@ $companyAddress = getSetting('company_address');
                 </tr>
                 <?php endforeach; ?>
             </tbody>
-            <tfoot>
-                <tr style="border-top: 2px solid #1a5276; font-weight: 700; background: #f0f2f5;">
-                    <td colspan="4" style="padding: 10px;">Total Entries: <?= $summary['total_entries'] ?></td>
-                    <td style="padding: 10px; text-align: right; color: <?= ($summary['total_in'] - $summary['total_out']) >= 0 ? '#27ae60' : '#e74c3c' ?>;">
-                        <?= formatCurrency($summary['total_in'] - $summary['total_out']) ?>
-                    </td>
-                    <td></td>
-                    <td style="padding: 10px; text-align: right; font-weight: 800; color: <?= $periodClosing >= 0 ? '#2c3e50' : '#e74c3c' ?>;">
-                        <?= formatCurrency($periodClosing) ?>
-                    </td>
-                </tr>
-            </tfoot>
         </table>
         <?php else: ?>
         <div style="text-align: center; padding: 30px; color: #aaa; border: 1px dashed #ddd; margin-top: 20px;">

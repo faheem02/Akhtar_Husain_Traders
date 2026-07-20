@@ -70,6 +70,54 @@ $recentEntries = $stmt->fetchAll();
         <span class="text-muted"><?= date('l, d M Y') ?></span>
     </div>
 
+    <!-- Summary Cards -->
+    <div class="row g-2 mb-4">
+        <div class="col-xl-3 col-md-6">
+            <div class="stat-card opening">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <div class="label">Opening Balance</div>
+                        <div class="value" style="font-size:1.1rem;"><?= formatCurrency($openingBalance) ?></div>
+                    </div>
+                    <div class="icon yellow"><i class="bi bi-sunrise"></i></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="stat-card cash-in">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <div class="label">Total Cash In</div>
+                        <div class="value amount-in" style="font-size:1.1rem;"><?= formatCurrency($summary['total_in']) ?></div>
+                    </div>
+                    <div class="icon green"><i class="bi bi-arrow-down-circle"></i></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="stat-card cash-out">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <div class="label">Total Cash Out</div>
+                        <div class="value amount-out" style="font-size:1.1rem;"><?= formatCurrency($summary['total_out']) ?></div>
+                    </div>
+                    <div class="icon red"><i class="bi bi-arrow-up-circle"></i></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="stat-card balance">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <div class="label">Closing Balance</div>
+                        <div class="value" style="color:#2e86c1;font-size:1.1rem;"><?= formatCurrency($closingBalance) ?></div>
+                    </div>
+                    <div class="icon blue"><i class="bi bi-wallet2"></i></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Quick Actions + Close Today -->
     <div class="row g-3 mb-4">
         <div class="col-md-4">
