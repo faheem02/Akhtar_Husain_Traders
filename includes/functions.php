@@ -27,7 +27,7 @@ function getSetting($key) {
 }
 
 function formatCurrency($amount) {
-    return 'PKR ' . number_format($amount, 2);
+    return number_format(round($amount, 2), 2);
 }
 
 function getTodayDate() {
@@ -51,7 +51,7 @@ function getOpeningBalance($date) {
     $stmt2->execute([$baseDate, $date]);
     $row2 = $stmt2->fetch();
 
-    return $baseBalance + $row2['total_in'] - $row2['total_out'];
+    return round($baseBalance + $row2['total_in'] - $row2['total_out'], 2);
 }
 
 function getClosingBalance($date) {
@@ -66,7 +66,7 @@ function getClosingBalance($date) {
     $stmt->execute([$date]);
     $row = $stmt->fetch();
 
-    return $opening + $row['total_in'] - $row['total_out'];
+    return round($opening + $row['total_in'] - $row['total_out'], 2);
 }
 
 function getTodaySummary($date) {
@@ -84,6 +84,61 @@ function getUniqueCustomers() {
     global $pdo;
     $stmt = $pdo->query("SELECT DISTINCT customer_name FROM cash_entries ORDER BY customer_name ASC");
     return $stmt->fetchAll(PDO::FETCH_COLUMN);
+}
+
+function findOrCreateCustomer($name, $phone = '', $openingBalance = 0) {
+    global $pdo;
+    $name = trim($name);
+    if ($name === '') return null;
+    $stmt = $pdo->prepare("SELECT id, name, phone, opening_balance FROM customers WHERE name = ?");
+    $stmt->execute([$name]);
+    $row = $stmt->fetch();
+    if ($row) {
+        return $row;
+    }
+    $stmt = $pdo->prepare("INSERT INTO customers (name, phone, opening_balance) VALUES (?, ?, ?)");
+    $stmt->execute([$name, $phone, floatval($openingBalance)]);
+    return [
+        'id' => $pdo->lastInsertId(),
+        'name' => $name,
+        'phone' => $phone,
+        'opening_balance' => floatval($openingBalance),
+    ];
+}
+
+function getAllCustomers() {
+    global $pdo;
+    $stmt = $pdo->query("
+        SELECT c.*,
+            COALESCE(SUM(CASE WHEN e.entry_type IN ('cash_out','adjustment_out') THEN e.amount ELSE 0 END), 0) as total_debit,
+            COALESCE(SUM(CASE WHEN e.entry_type IN ('cash_in','adjustment_in') THEN e.amount ELSE 0 END), 0) as total_credit,
+            COUNT(e.id) as entry_count,
+            MAX(e.entry_date) as last_entry_date
+        FROM customers c
+        LEFT JOIN cash_entries e ON e.customer_id = c.id
+        GROUP BY c.id
+        ORDER BY last_entry_date DESC, c.name ASC
+    ");
+    return $stmt->fetchAll();
+}
+
+function getCustomerLedger($customerId, $from = '', $to = '') {
+    global $pdo;
+    $customerId = intval($customerId);
+    $sql = "SELECT * FROM cash_entries WHERE customer_id = ?";
+    $params = [$customerId];
+    if ($from !== '') {
+        $sql .= " AND entry_date >= ?";
+        $params[] = $from;
+    }
+    if ($to !== '') {
+        $sql .= " AND entry_date <= ?";
+        $params[] = $to;
+    }
+    $sql .= " ORDER BY entry_date ASC, created_at ASC";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    return $stmt->fetchAll();
 }
 
 function getLatestClosingBalance() {

@@ -19,19 +19,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_entry'])) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_entry'])) {
     $entryType    = $_POST['entry_type'] ?? 'cash_in';
     $customerName = trim($_POST['customer_name'] ?? '');
+    $customerPhone = trim($_POST['customer_phone'] ?? '');
+    $customerOpening = floatval($_POST['customer_opening'] ?? 0);
     $amount       = floatval($_POST['amount'] ?? 0);
     $entryDate    = $_POST['entry_date'] ?? getTodayDate();
     $description  = trim($_POST['description'] ?? '');
+    $customerId   = null;
 
     if ($entryType === 'adjustment') {
         $adjustDir = $_POST['adjustment_direction'] ?? 'in';
         $entryType = ($adjustDir === 'in') ? 'adjustment_in' : 'adjustment_out';
         $customerName = 'Balance Adjustment';
+    } elseif ($customerName !== '') {
+        $customer = findOrCreateCustomer($customerName, $customerPhone, $customerOpening);
+        $customerId = $customer ? intval($customer['id']) : null;
     }
 
     if ($amount > 0) {
-        $stmt = $pdo->prepare("INSERT INTO cash_entries (entry_type, customer_name, amount, entry_date, description) VALUES (?, ?, ?, ?, ?)");
-        $stmt->execute([$entryType, $customerName, $amount, $entryDate, $description]);
+        $stmt = $pdo->prepare("INSERT INTO cash_entries (entry_type, customer_name, customer_id, amount, entry_date, description) VALUES (?, ?, ?, ?, ?, ?)");
+        $stmt->execute([$entryType, $customerName, $customerId, $amount, $entryDate, $description]);
         if ($entryType === 'adjustment_in') {
             setFlash('success', 'Adjustment (+) of ' . formatCurrency($amount) . ' saved.');
         } elseif ($entryType === 'adjustment_out') {
@@ -84,13 +90,8 @@ if ($filterFrom !== '') {
     $periodOpening = getOpeningBalance($filterFrom);
 } elseif ($filterCust !== '') {
     $periodOpening = getOpeningBalance($today);
-} elseif ($summary['total_entries'] > 0) {
-    $firstDateStmt = $pdo->prepare("SELECT MIN(entry_date) as first_date FROM cash_entries" . (!empty($summaryWhere) ? ' WHERE ' . implode(' AND ', $summaryWhere) : ''));
-    $firstDateStmt->execute($summaryParams);
-    $firstDateRow = $firstDateStmt->fetch();
-    $periodOpening = getOpeningBalance($firstDateRow['first_date']);
 } else {
-    $periodOpening = 0;
+    $periodOpening = getOpeningBalance($today);
 }
 $periodClosing = $periodOpening + $summary['total_in'] - $summary['total_out'];
 
@@ -138,6 +139,9 @@ require_once __DIR__ . '/includes/header.php';
                 <a href="index.php" class="btn btn-outline-primary btn-sm" style="flex-shrink:0;">
                     <i class="bi bi-speedometer2"></i> Dashboard
                 </a>
+                <a href="customers.php" class="btn btn-outline-info btn-sm" style="flex-shrink:0;">
+                    <i class="bi bi-people"></i> Customers
+                </a>
                 <a href="print-cashbook.php?<?= $printQuery ?>" class="btn btn-print btn-sm" style="flex-shrink:0;" target="_blank">
                     <i class="bi bi-printer"></i> Print
                 </a>
@@ -181,17 +185,21 @@ require_once __DIR__ . '/includes/header.php';
                     </div>
                 </div>
                 <div class="row g-3">
-                    <div class="col-md-4 customer-field">
+                    <div class="col-md-3 customer-field">
                         <label class="form-label">Customer Name</label>
-                        <input type="text" name="customer_name" id="customerNameInput" class="form-control" placeholder="e.g. Ahmed Khan (optional)" list="customerList">
+                        <input type="text" name="customer_name" id="customerNameInput" class="form-control" placeholder="Type customer name..." list="customerList" autocomplete="off">
                         <datalist id="customerList">
                             <?php foreach ($customers as $c): ?>
                             <option value="<?= sanitize($c) ?>">
                             <?php endforeach; ?>
                         </datalist>
+                        <div id="customerStatus" class="mt-1" style="font-size:0.85rem;"></div>
                     </div>
+                    <input type="hidden" name="customer_phone" id="customerPhoneInput" value="">
+                    <input type="hidden" name="customer_opening" id="customerOpeningInput" value="0">
+                    <input type="hidden" name="customer_id" id="customerIdHidden" value="">
                     <div class="col-md-2">
-                        <label class="form-label">Amount (PKR) *</label>
+                        <label class="form-label">Amount *</label>
                         <input type="number" name="amount" class="form-control" step="0.01" min="0.01" placeholder="0.00" required>
                     </div>
                     <div class="col-md-2">
@@ -357,31 +365,130 @@ require_once __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<!-- Quick Add Customer Modal -->
+<div class="modal fade" id="quickAddModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-person-plus"></i> New Customer</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">Name</label>
+          <input type="text" id="quickCustName" class="form-control" readonly style="background:#f0f0f0;">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Phone</label>
+          <input type="text" id="quickCustPhone" class="form-control" placeholder="03XX-XXXXXXX">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Opening Balance</label>
+          <input type="number" id="quickCustOpening" class="form-control" step="0.01" value="0">
+        </div>
+        <div id="quickAddMsg" style="font-size:0.85rem;"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" onclick="saveQuickCustomer()"><i class="bi bi-save"></i> Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
+function saveQuickCustomer() {
+    var name = document.getElementById('quickCustName').value.trim();
+    var phone = document.getElementById('quickCustPhone').value.trim();
+    var opening = document.getElementById('quickCustOpening').value;
+    var msg = document.getElementById('quickAddMsg');
+    if (!name) { msg.innerHTML = '<span style="color:red;">Name required</span>'; return; }
+    
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', 'ajax-add-customer.php', true);
+    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+    xhr.onload = function() {
+        if (xhr.status === 200) {
+            var res = JSON.parse(xhr.responseText);
+            if (res.success) {
+                msg.innerHTML = '<span style="color:#28b463;">Customer added!</span>';
+                customerDb.push(name);
+                custField.value = name;
+                recomputeNewCust();
+                setTimeout(function() {
+                    var modal = bootstrap.Modal.getInstance(document.getElementById('quickAddModal'));
+                    if (modal) modal.hide();
+                }, 500);
+            } else {
+                msg.innerHTML = '<span style="color:red;">' + res.error + '</span>';
+            }
+        }
+    };
+    xhr.send('name=' + encodeURIComponent(name) + '&phone=' + encodeURIComponent(phone) + '&opening=' + encodeURIComponent(opening));
+}
+
+var customerDb = <?= json_encode($customers) ?>;
+var custField = document.getElementById('customerNameInput');
+var custStatus = document.getElementById('customerStatus');
+
+function isExistingCustomer(val) {
+    val = val.trim().toLowerCase();
+    if (!val) return true;
+    for (var i = 0; i < customerDb.length; i++) {
+        if (customerDb[i].toLowerCase() === val) return true;
+    }
+    return false;
+}
+
+function recomputeNewCust() {
+    var v = custField.value.trim();
+    var exists = isExistingCustomer(v);
+    if (v === '') {
+        custStatus.innerHTML = '';
+    } else if (exists) {
+        custStatus.innerHTML = '<span style=\"color:#28b463;\">&#10003; Existing customer</span>';
+    } else {
+        custStatus.innerHTML = '<span style=\"color:#e74c3c;\">Customer not found </span>'
+            + '<a href=\"#\" onclick=\"event.preventDefault();openQuickAdd();\" class=\"btn btn-sm btn-outline-warning\" style=\"font-size:0.8rem; padding:1px 8px;\">'
+            + '<i class=\"bi bi-plus-circle\"></i> Add</a>';
+    }
+}
+
+function openQuickAdd() {
+    document.getElementById('quickCustName').value = custField.value.trim();
+    document.getElementById('quickCustPhone').value = '';
+    document.getElementById('quickCustOpening').value = '0';
+    var modal = new bootstrap.Modal(document.getElementById('quickAddModal'));
+    modal.show();
+}
+
+custField.addEventListener('input', recomputeNewCust);
+
 function updateFormColor() {
     var isIn = document.getElementById('typeCashIn').checked;
     var isOut = document.getElementById('typeCashOut').checked;
     var isAdj = document.getElementById('typeAdjustment').checked;
     var btn = document.getElementById('submitBtn');
     var adjDir = document.getElementById('adjustmentDir');
-    var customerFields = document.querySelectorAll('.customer-field');
-    var descFields = document.querySelectorAll('.desc-field');
+    var custFlds = document.querySelectorAll('.customer-field');
+    var descFlds = document.querySelectorAll('.desc-field');
 
     if (isAdj) {
         adjDir.style.display = 'block';
         btn.className = 'btn btn-warning';
-        btn.innerHTML = '<i class="bi bi-sliders"></i> Save';
-        customerFields.forEach(function(el) { el.style.display = 'none'; });
+        btn.innerHTML = '<i class=\"bi bi-sliders\"></i> Save';
+        custFlds.forEach(function(el) { el.style.display = 'none'; });
     } else {
         adjDir.style.display = 'none';
-        customerFields.forEach(function(el) { el.style.display = ''; });
-        descFields.forEach(function(el) { el.style.display = ''; });
+        custFlds.forEach(function(el) { el.style.display = ''; });
+        descFlds.forEach(function(el) { el.style.display = ''; });
+        recomputeNewCust();
         if (isIn) {
             btn.className = 'btn btn-success';
-            btn.innerHTML = '<i class="bi bi-arrow-down-circle"></i> Save';
+            btn.innerHTML = '<i class=\"bi bi-arrow-down-circle\"></i> Save';
         } else {
             btn.className = 'btn btn-danger';
-            btn.innerHTML = '<i class="bi bi-arrow-up-circle"></i> Save';
+            btn.innerHTML = '<i class=\"bi bi-arrow-up-circle\"></i> Save';
         }
     }
 }

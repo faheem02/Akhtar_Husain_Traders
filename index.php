@@ -67,7 +67,11 @@ $recentEntries = $stmt->fetchAll();
 <div class="content-wrapper">
     <div class="page-header">
         <h2><i class="bi bi-speedometer2"></i> Dashboard</h2>
-        <span class="text-muted"><?= date('l, d M Y') ?></span>
+        <div class="d-flex gap-2">
+            <a href="cash-book.php" class="btn btn-outline-success"><i class="bi bi-journal-bookmark"></i> Cash Book</a>
+            <a href="customers.php" class="btn btn-outline-info"><i class="bi bi-people"></i> Customers</a>
+            <span class="text-muted align-self-center"><?= date('l, d M Y') ?></span>
+        </div>
     </div>
 
     <!-- Summary Cards -->
@@ -167,7 +171,7 @@ $recentEntries = $stmt->fetchAll();
                     <input type="date" name="opening_date" class="form-control" value="<?= $today ?>" required>
                 </div>
                 <div class="col-md-3 col-6">
-                    <label class="form-label">Amount (PKR)</label>
+                    <label class="form-label">Amount</label>
                     <input type="number" name="opening_amount" class="form-control" step="0.01" value="0" min="0" required>
                 </div>
                 <div class="col-md-3 col-12">

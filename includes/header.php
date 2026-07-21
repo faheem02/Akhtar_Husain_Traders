@@ -15,46 +15,18 @@ $currentPage = basename($_SERVER['PHP_SELF']);
     <title><?= $pageTitle ?? $companyName ?></title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
-    <link href="assets/css/style.css" rel="stylesheet">
+    <link href="assets/css/style.css?v=2" rel="stylesheet">
 </head>
 <body>
 
-<div class="sidebar no-print" id="sidebar">
-    <div class="sidebar-brand">
-        <i class="bi bi-shop"></i>
-        <span><?= sanitize($companyName) ?></span>
-    </div>
-
-    <ul class="sidebar-nav">
-        <li>
-            <a href="index.php" class="<?= $currentPage === 'index.php' ? 'active' : '' ?>">
-                <i class="bi bi-speedometer2"></i> Dashboard
-            </a>
-        </li>
-        <li>
-            <a href="cash-book.php" class="<?= $currentPage === 'cash-book.php' ? 'active' : '' ?>">
-                <i class="bi bi-journal-bookmark"></i> Cash Book
-            </a>
-        </li>
-    </ul>
-
-    <div class="sidebar-footer">
-        <a href="logout.php">
-            <i class="bi bi-box-arrow-right"></i> Logout
-        </a>
-    </div>
-</div>
-
 <div class="main-content" id="mainContent">
     <nav class="topbar no-print">
-        <button class="sidebar-toggle" onclick="toggleSidebar()">
-            <i class="bi bi-list"></i>
-        </button>
         <div class="topbar-date">
             <i class="bi bi-calendar3"></i> <?= date('l, d M Y') ?>
         </div>
         <div class="topbar-user">
             <i class="bi bi-person-circle"></i> <?= sanitize($_SESSION['username'] ?? 'Admin') ?>
+            <a href="logout.php" class="topbar-logout"><i class="bi bi-box-arrow-right"></i></a>
         </div>
     </nav>
 

@@ -41,8 +41,8 @@ if (!empty($filterDateFrom)) {
     $periodOpening = getOpeningBalance($filterDateFrom);
 } elseif (!empty($filterCustomer)) {
     $periodOpening = getOpeningBalance(getTodayDate());
-} elseif (!empty($entries)) {
-    $periodOpening = getOpeningBalance($entries[0]['entry_date']);
+} else {
+    $periodOpening = getOpeningBalance(getTodayDate());
 }
 
 $runningBalance = $periodOpening;
@@ -127,9 +127,9 @@ $companyAddress = getSetting('company_address');
                     <th style="padding: 8px 10px;">Date</th>
                     <th style="padding: 8px 10px;">Customer</th>
                     <th style="padding: 8px 10px;">Type</th>
-                    <th style="padding: 8px 10px; text-align: right;">Amount (PKR)</th>
+                    <th style="padding: 8px 10px; text-align: right;">Amount</th>
                     <th style="padding: 8px 10px;">Description</th>
-                    <th style="padding: 8px 10px; text-align: right;">Balance (PKR)</th>
+                    <th style="padding: 8px 10px; text-align: right;">Balance</th>
                 </tr>
             </thead>
             <tbody>
