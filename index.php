@@ -66,12 +66,18 @@ $recentEntries = $stmt->fetchAll();
 
 <div class="content-wrapper">
     <div class="page-header">
-        <h2><i class="bi bi-speedometer2"></i> Dashboard</h2>
-        <div class="d-flex gap-2">
-            <a href="cash-book.php" class="btn btn-outline-success"><i class="bi bi-journal-bookmark"></i> Cash Book</a>
-            <a href="customers.php" class="btn btn-outline-info"><i class="bi bi-people"></i> Customers</a>
-            <span class="text-muted align-self-center"><?= date('l, d M Y') ?></span>
-        </div>
+        <h2 style="width:100%;">
+            <i class="bi bi-speedometer2"></i> Dashboard
+            <span style="margin-left:auto; display:flex; gap:6px; align-items:center;">
+                <a href="cash-book.php" class="btn btn-outline-success btn-sm">
+                    <i class="bi bi-journal-bookmark"></i> Cash Book
+                </a>
+                <a href="customers.php" class="btn btn-outline-info btn-sm">
+                    <i class="bi bi-people"></i> Customers
+                </a>
+                <span class="text-muted" style="font-size:0.85rem; white-space:nowrap;"><?= date('l, d M Y') ?></span>
+            </span>
+        </h2>
     </div>
 
     <!-- Summary Cards -->

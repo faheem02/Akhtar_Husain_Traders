@@ -61,7 +61,7 @@ require_once __DIR__ . '/includes/header.php';
 <div class="content-wrapper">
     <div class="page-header">
         <h2 style="width:100%;">
-            <i class="bi bi-people"></i> <?= $customerInfo ? sanitize($customerInfo['name']) . ' - Ledger' : 'Customers' ?>
+
             <span style="margin-left:auto; display:flex; gap:6px;">
                 <?php if ($customerInfo): ?>
                 <a href="customers.php" class="btn btn-outline-secondary btn-sm">
@@ -208,8 +208,9 @@ require_once __DIR__ . '/includes/header.php';
         <div class="card-body">
             <!-- Search -->
             <div class="row g-2 mb-3">
-                <div class="col-md-6">
-                    <input type="text" id="customerSearch" class="form-control" placeholder="Search by name, phone..." onkeyup="filterCustomers()">
+                <div class="col-md-6" style="position:relative;">
+                    <input type="text" id="customerSearch" class="form-control" placeholder="Search by name, phone..." oninput="filterCustomers()" autocomplete="off">
+                    <div id="searchDropdown" style="display:none; position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid #ddd; border-radius:0 0 8px 8px; max-height:200px; overflow-y:auto; z-index:100; box-shadow:0 4px 12px rgba(0,0,0,0.1);"></div>
                 </div>
                 <div class="col-md-6 text-md-end">
                     <button class="btn btn-success btn-sm" onclick="document.getElementById('quickAddForm').reset();new bootstrap.Modal(document.getElementById('quickAddModal')).show();"><i class="bi bi-plus-circle"></i> Add Customer</button>
@@ -295,13 +296,51 @@ require_once __DIR__ . '/includes/header.php';
 </div>
 
 <script>
+var customerNames = <?= json_encode(array_map(function($c) { return $c['name']; }, $allCustomers)) ?>;
+var searchInput = document.getElementById('customerSearch');
+var searchDropdown = document.getElementById('searchDropdown');
+
 function filterCustomers() {
-  var input = document.getElementById('customerSearch').value.toLowerCase();
+  var input = searchInput.value.toLowerCase();
+
   var rows = document.querySelectorAll('.table-custom tbody tr');
   for (var i = 0; i < rows.length; i++) {
     rows[i].style.display = rows[i].textContent.toLowerCase().indexOf(input) > -1 ? '' : 'none';
   }
+
+  if (input.length === 0) {
+    searchDropdown.style.display = 'none';
+    return;
+  }
+
+  var matches = customerNames.filter(function(name) {
+    return name.toLowerCase().indexOf(input) > -1;
+  });
+
+  if (matches.length === 0) {
+    searchDropdown.style.display = 'none';
+    return;
+  }
+
+  var html = '';
+  for (var i = 0; i < matches.length; i++) {
+    html += '<div class="search-suggestion" onmousedown="selectSuggestion(\'' + matches[i].replace(/'/g, "\\'") + '\')" style="padding:8px 14px; cursor:pointer; font-size:0.9rem; border-bottom:1px solid #f0f0f0;">' + matches[i] + '</div>';
+  }
+  searchDropdown.innerHTML = html;
+  searchDropdown.style.display = 'block';
 }
+
+function selectSuggestion(name) {
+  searchInput.value = name;
+  searchDropdown.style.display = 'none';
+  filterCustomers();
+}
+
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('#customerSearch') && !e.target.closest('#searchDropdown')) {
+    searchDropdown.style.display = 'none';
+  }
+});
 </script>
 
 <?php require_once __DIR__ . '/includes/footer.php'; ?>

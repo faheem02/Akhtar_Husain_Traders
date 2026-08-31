@@ -138,7 +138,7 @@ body {
     background: #fff;
     border-radius: 12px;
     box-shadow: 0 2px 12px rgba(0,0,0,0.06);
-    overflow: hidden;
+    overflow: visible;
     margin-bottom: 15px;
 }
 
@@ -242,6 +242,14 @@ body {
     background: linear-gradient(135deg, #6c3483, #8e44ad);
     color: #fff;
     transform: translateY(-1px);
+}
+
+.btn-sm.btn-primary,
+.btn-sm.btn-print,
+.btn-sm.btn-success,
+.btn-sm.btn-danger {
+    padding: 6px 12px;
+    font-size: 0.82rem;
 }
 
 .btn-lg { padding: 12px 20px; font-size: 1rem; }
@@ -524,6 +532,11 @@ body {
         text-align: center;
         padding: 8px 12px;
         font-size: 0.85rem;
+    }
+
+    .page-header h2 span .btn {
+        padding: 6px 10px;
+        font-size: 0.8rem;
     }
 
     .content-wrapper {

@@ -136,10 +136,10 @@ require_once __DIR__ . '/includes/header.php';
         <h2 style="width:100%;">
             <i class="bi bi-journal-bookmark"></i> Cash Book
             <span style="margin-left:auto; display:flex; gap:6px;">
-                <a href="index.php" class="btn btn-outline-primary btn-sm" style="flex-shrink:0;">
+                <a href="index.php" class="btn btn-outline-primary btn-sm">
                     <i class="bi bi-speedometer2"></i> Dashboard
                 </a>
-                <a href="customers.php" class="btn btn-outline-info btn-sm" style="flex-shrink:0;">
+                <a href="customers.php" class="btn btn-outline-info btn-sm">
                     <i class="bi bi-people"></i> Customers
                 </a>
                 <a href="print-cashbook.php?<?= $printQuery ?>" class="btn btn-print btn-sm" style="flex-shrink:0;" target="_blank">
@@ -152,7 +152,7 @@ require_once __DIR__ . '/includes/header.php';
     <!-- Entry Form -->
     <div class="card-custom mb-4">
         <div class="card-header"><i class="bi bi-plus-circle"></i> New Entry</div>
-        <div class="card-body">
+        <div class="card-body" style="padding-bottom:40px;">
             <form method="POST" action="" id="entryForm">
                 <div class="mb-3">
                     <label class="form-label">Entry Type</label>
@@ -184,16 +184,12 @@ require_once __DIR__ . '/includes/header.php';
                         </div>
                     </div>
                 </div>
-                <div class="row g-3">
-                    <div class="col-md-3 customer-field">
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-3 customer-field" style="position:relative;">
                         <label class="form-label">Customer Name</label>
-                        <input type="text" name="customer_name" id="customerNameInput" class="form-control" placeholder="Type customer name..." list="customerList" autocomplete="off">
-                        <datalist id="customerList">
-                            <?php foreach ($customers as $c): ?>
-                            <option value="<?= sanitize($c) ?>">
-                            <?php endforeach; ?>
-                        </datalist>
-                        <div id="customerStatus" class="mt-1" style="font-size:0.85rem;"></div>
+                        <input type="text" name="customer_name" id="customerNameInput" class="form-control" placeholder="Type customer name..." autocomplete="off">
+                        <div id="custSuggestions" style="display:none; position:absolute; left:0; top:100%; width:100%; background:#fff; border:1px solid #ddd; border-radius:0 0 8px 8px; max-height:180px; overflow-y:auto; z-index:100; box-shadow:0 4px 12px rgba(0,0,0,0.1);"></div>
+                        <div id="customerStatus" style="font-size:0.78rem; position:absolute; left:0; top:calc(100% + 4px); width:100%;"></div>
                     </div>
                     <input type="hidden" name="customer_phone" id="customerPhoneInput" value="">
                     <input type="hidden" name="customer_opening" id="customerOpeningInput" value="0">
@@ -210,8 +206,8 @@ require_once __DIR__ . '/includes/header.php';
                         <label class="form-label">Description (optional)</label>
                         <input type="text" name="description" class="form-control" placeholder="Note or reference...">
                     </div>
-                    <div class="col-md-1 d-flex align-items-end">
-                        <button type="submit" name="add_entry" id="submitBtn" class="btn btn-success">
+                    <div class="col-auto">
+                        <button type="submit" name="add_entry" id="submitBtn" class="btn btn-success btn-sm">
                             <i class="bi bi-arrow-down-circle"></i> Save
                         </button>
                     </div>
@@ -414,6 +410,7 @@ function saveQuickCustomer() {
                 msg.innerHTML = '<span style="color:#28b463;">Customer added!</span>';
                 customerDb.push(name);
                 custField.value = name;
+                custSuggestions.style.display = 'none';
                 recomputeNewCust();
                 setTimeout(function() {
                     var modal = bootstrap.Modal.getInstance(document.getElementById('quickAddModal'));
@@ -430,6 +427,7 @@ function saveQuickCustomer() {
 var customerDb = <?= json_encode($customers) ?>;
 var custField = document.getElementById('customerNameInput');
 var custStatus = document.getElementById('customerStatus');
+var custSuggestions = document.getElementById('custSuggestions');
 
 function isExistingCustomer(val) {
     val = val.trim().toLowerCase();
@@ -438,6 +436,32 @@ function isExistingCustomer(val) {
         if (customerDb[i].toLowerCase() === val) return true;
     }
     return false;
+}
+
+function showSuggestions(val) {
+    if (!val || val.length === 0) {
+        custSuggestions.style.display = 'none';
+        return;
+    }
+    var matches = customerDb.filter(function(name) {
+        return name.toLowerCase().indexOf(val.toLowerCase()) > -1;
+    });
+    if (matches.length === 0) {
+        custSuggestions.style.display = 'none';
+        return;
+    }
+    var html = '';
+    for (var i = 0; i < matches.length; i++) {
+        html += '<div style="padding:7px 12px; cursor:pointer; font-size:0.88rem; border-bottom:1px solid #f0f0f0;" onmousedown="selectCustSuggestion(\'' + matches[i].replace(/'/g, "\\'") + '\')">' + matches[i] + '</div>';
+    }
+    custSuggestions.innerHTML = html;
+    custSuggestions.style.display = 'block';
+}
+
+function selectCustSuggestion(name) {
+    custField.value = name;
+    custSuggestions.style.display = 'none';
+    recomputeNewCust();
 }
 
 function recomputeNewCust() {
@@ -462,7 +486,16 @@ function openQuickAdd() {
     modal.show();
 }
 
-custField.addEventListener('input', recomputeNewCust);
+custField.addEventListener('input', function() {
+    showSuggestions(custField.value.trim());
+    recomputeNewCust();
+});
+
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.customer-field')) {
+        custSuggestions.style.display = 'none';
+    }
+});
 
 function updateFormColor() {
     var isIn = document.getElementById('typeCashIn').checked;

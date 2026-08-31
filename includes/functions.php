@@ -82,7 +82,7 @@ function getTodaySummary($date) {
 
 function getUniqueCustomers() {
     global $pdo;
-    $stmt = $pdo->query("SELECT DISTINCT customer_name FROM cash_entries ORDER BY customer_name ASC");
+    $stmt = $pdo->query("SELECT DISTINCT name FROM customers ORDER BY name ASC");
     return $stmt->fetchAll(PDO::FETCH_COLUMN);
 }
 
