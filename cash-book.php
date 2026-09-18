@@ -15,12 +15,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_entry'])) {
     exit;
 }
 
-// Add entry
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_entry'])) {
+// Edit entry
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_entry'])) {
+    $editId       = intval($_POST['entry_id'] ?? 0);
     $entryType    = $_POST['entry_type'] ?? 'cash_in';
     $customerName = trim($_POST['customer_name'] ?? '');
-    $customerPhone = trim($_POST['customer_phone'] ?? '');
-    $customerOpening = floatval($_POST['customer_opening'] ?? 0);
     $amount       = floatval($_POST['amount'] ?? 0);
     $entryDate    = $_POST['entry_date'] ?? getTodayDate();
     $description  = trim($_POST['description'] ?? '');
@@ -29,26 +28,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_entry'])) {
     if ($entryType === 'adjustment') {
         $adjustDir = $_POST['adjustment_direction'] ?? 'in';
         $entryType = ($adjustDir === 'in') ? 'adjustment_in' : 'adjustment_out';
-        $customerName = 'Balance Adjustment';
-    } elseif ($customerName !== '') {
-        $customer = findOrCreateCustomer($customerName, $customerPhone, $customerOpening);
+    }
+
+    if ($customerName !== '') {
+        $customer = findOrCreateCustomer($customerName);
         $customerId = $customer ? intval($customer['id']) : null;
     }
 
-    if ($amount > 0) {
-        $stmt = $pdo->prepare("INSERT INTO cash_entries (entry_type, customer_name, customer_id, amount, entry_date, description) VALUES (?, ?, ?, ?, ?, ?)");
-        $stmt->execute([$entryType, $customerName, $customerId, $amount, $entryDate, $description]);
-        if ($entryType === 'adjustment_in') {
-            setFlash('success', 'Adjustment (+) of ' . formatCurrency($amount) . ' saved.');
-        } elseif ($entryType === 'adjustment_out') {
-            setFlash('success', 'Adjustment (-) of ' . formatCurrency($amount) . ' saved.');
-        } else {
-            setFlash('success', ($entryType === 'cash_in' ? 'Cash In' : 'Cash Out') . ' of ' . formatCurrency($amount) . ' saved.');
-        }
+    if ($editId > 0 && $amount > 0) {
+        $stmt = $pdo->prepare("UPDATE cash_entries SET entry_type = ?, customer_name = ?, customer_id = ?, amount = ?, entry_date = ?, description = ? WHERE id = ?");
+        $stmt->execute([$entryType, $customerName, $customerId, $amount, $entryDate, $description, $editId]);
+        setFlash('success', 'Entry updated successfully.');
     } else {
         setFlash('error', 'Please enter a valid amount.');
     }
-    header('Location: cash-book.php');
+
+    $qs = $_POST['redirect_query'] ?? ($_SERVER['QUERY_STRING'] ?? '');
+    header('Location: cash-book.php' . ($qs ? '?' . $qs : ''));
     exit;
 }
 
@@ -118,8 +114,7 @@ foreach ($allEntries as &$entry) {
 unset($entry);
 
 $displayEntries = array_reverse($allEntries);
-
-$customers = getUniqueCustomers();
+$allCustomers = getUniqueCustomers();
 
 require_once __DIR__ . '/includes/header.php';
 ?>
@@ -133,92 +128,31 @@ require_once __DIR__ . '/includes/header.php';
         $printQuery = http_build_query($printParams);
     ?>
     <div class="page-header">
-        <h2 style="width:100%;">
+        <h2>
             <i class="bi bi-journal-bookmark"></i> Cash Book
-            <span style="margin-left:auto; display:flex; gap:6px;">
-                <a href="index.php" class="btn btn-outline-primary btn-sm">
-                    <i class="bi bi-speedometer2"></i> Dashboard
-                </a>
-                <a href="customers.php" class="btn btn-outline-info btn-sm">
-                    <i class="bi bi-people"></i> Customers
-                </a>
-                <a href="print-cashbook.php?<?= $printQuery ?>" class="btn btn-print btn-sm" style="flex-shrink:0;" target="_blank">
-                    <i class="bi bi-printer"></i> Print
-                </a>
-            </span>
         </h2>
-    </div>
-
-    <!-- Entry Form -->
-    <div class="card-custom mb-4">
-        <div class="card-header"><i class="bi bi-plus-circle"></i> New Entry</div>
-        <div class="card-body" style="padding-bottom:40px;">
-            <form method="POST" action="" id="entryForm">
-                <div class="mb-3">
-                    <label class="form-label">Entry Type</label>
-                    <div class="d-flex gap-4 flex-wrap">
-                        <div class="form-check">
-                            <input class="form-check-input" type="radio" name="entry_type" id="typeCashIn" value="cash_in" checked onchange="updateFormColor()">
-                            <label class="form-check-label fw-bold text-success" for="typeCashIn"><i class="bi bi-arrow-down-circle"></i> Cash In</label>
-                        </div>
-                        <div class="form-check">
-                            <input class="form-check-input" type="radio" name="entry_type" id="typeCashOut" value="cash_out" onchange="updateFormColor()">
-                            <label class="form-check-label fw-bold text-danger" for="typeCashOut"><i class="bi bi-arrow-up-circle"></i> Cash Out</label>
-                        </div>
-                        <div class="form-check">
-                            <input class="form-check-input" type="radio" name="entry_type" id="typeAdjustment" value="adjustment" onchange="updateFormColor()">
-                            <label class="form-check-label fw-bold" for="typeAdjustment" style="color:#e67e22;"><i class="bi bi-sliders"></i> Balance Adjustment</label>
-                        </div>
-                    </div>
-                    <div id="adjustmentDir" class="mt-2" style="display:none;">
-                        <label class="form-label fw-bold">Direction</label>
-                        <div class="d-flex gap-4">
-                            <div class="form-check">
-                                <input class="form-check-input" type="radio" name="adjustment_direction" id="adjIn" value="in" checked>
-                                <label class="form-check-label fw-bold text-success" for="adjIn"><i class="bi bi-plus-circle"></i> Increase (+)</label>
-                            </div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="radio" name="adjustment_direction" id="adjOut" value="out">
-                                <label class="form-check-label fw-bold text-danger" for="adjOut"><i class="bi bi-dash-circle"></i> Decrease (-)</label>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="row g-3 align-items-end">
-                    <div class="col-md-3 customer-field" style="position:relative;">
-                        <label class="form-label">Customer Name</label>
-                        <input type="text" name="customer_name" id="customerNameInput" class="form-control" placeholder="Type customer name..." autocomplete="off">
-                        <div id="custSuggestions" style="display:none; position:absolute; left:0; top:100%; width:100%; background:#fff; border:1px solid #ddd; border-radius:0 0 8px 8px; max-height:180px; overflow-y:auto; z-index:100; box-shadow:0 4px 12px rgba(0,0,0,0.1);"></div>
-                        <div id="customerStatus" style="font-size:0.78rem; position:absolute; left:0; top:calc(100% + 4px); width:100%;"></div>
-                    </div>
-                    <input type="hidden" name="customer_phone" id="customerPhoneInput" value="">
-                    <input type="hidden" name="customer_opening" id="customerOpeningInput" value="0">
-                    <input type="hidden" name="customer_id" id="customerIdHidden" value="">
-                    <div class="col-md-2">
-                        <label class="form-label">Amount *</label>
-                        <input type="number" name="amount" class="form-control" step="0.01" min="0.01" placeholder="0.00" required>
-                    </div>
-                    <div class="col-md-2">
-                        <label class="form-label">Date *</label>
-                        <input type="date" name="entry_date" class="form-control" value="<?= $today ?>" required>
-                    </div>
-                    <div class="col-md-3 desc-field">
-                        <label class="form-label">Description (optional)</label>
-                        <input type="text" name="description" class="form-control" placeholder="Note or reference...">
-                    </div>
-                    <div class="col-auto">
-                        <button type="submit" name="add_entry" id="submitBtn" class="btn btn-success btn-sm">
-                            <i class="bi bi-arrow-down-circle"></i> Save
-                        </button>
-                    </div>
-                </div>
-            </form>
+        <div class="header-actions">
+            <a href="customers.php" class="btn btn-success btn-sm">
+                <i class="bi bi-person-plus"></i> Customer Entries
+            </a>
+            <a href="index.php" class="btn btn-outline-primary btn-sm">
+                <i class="bi bi-speedometer2"></i> Dashboard
+            </a>
+            <a href="customers.php" class="btn btn-outline-info btn-sm">
+                <i class="bi bi-people"></i> Customers
+            </a>
+            <a href="closings-history.php" class="btn btn-outline-warning btn-sm">
+                <i class="bi bi-journal-check"></i> Closing History
+            </a>
+            <a href="print-cashbook.php?<?= $printQuery ?>" class="btn btn-print btn-sm" target="_blank">
+                <i class="bi bi-printer"></i> Print
+            </a>
         </div>
     </div>
 
     <!-- Filter + Entries -->
     <div class="card-custom">
-        <div class="card-header"><i class="bi bi-funnel"></i> Filters & Entries</div>
+        <div class="card-header"><i class="bi bi-funnel"></i> Filters & Cash Entries</div>
         <div class="card-body">
             <form method="GET" action="" class="filter-bar mb-3">
                 <div class="row g-2 align-items-end">
@@ -251,11 +185,13 @@ require_once __DIR__ . '/includes/header.php';
             <?php else: ?>
 
             <?php $netTotal = $summary['total_in'] - $summary['total_out']; ?>
-            <div class="d-flex justify-content-between align-items-center mb-2 py-2 px-3" style="background:#f0f2f5; border-radius:8px; font-size:0.95rem; flex-wrap:wrap; gap:4px;">
-                <span style="font-weight:600;">Opening: <?= formatCurrency($periodOpening) ?></span>
-                <span style="font-weight:600;">Entries: <?= $summary['total_entries'] ?></span>
+            <div class="d-flex justify-content-between align-items-center mb-3 py-2 px-3" style="background:#f0f2f5; border-radius:8px; font-size:0.95rem; flex-wrap:wrap; gap:6px;">
+                <span style="font-weight:600;"><i class="bi bi-sunrise text-warning"></i> Opening: <?= formatCurrency($periodOpening) ?></span>
+                <span style="font-weight:600;"><i class="bi bi-list-check text-primary"></i> Total Entries: <?= $summary['total_entries'] ?></span>
+                <span style="font-weight:600; color:#27ae60;"><i class="bi bi-arrow-down-circle"></i> Total In: <?= formatCurrency($summary['total_in']) ?></span>
+                <span style="font-weight:600; color:#e74c3c;"><i class="bi bi-arrow-up-circle"></i> Total Out: <?= formatCurrency($summary['total_out']) ?></span>
                 <span style="font-weight:700; color:#1a5276;">
-                    Total Amount: <?= $netTotal >= 0 ? '+' : '-' ?><?= formatCurrency(abs($netTotal)) ?>
+                    Net Balance: <?= $netTotal >= 0 ? '+' : '-' ?><?= formatCurrency(abs($netTotal)) ?>
                 </span>
             </div>
 
@@ -299,12 +235,24 @@ require_once __DIR__ . '/includes/header.php';
                                 <?= formatCurrency($entry['running_balance']) ?>
                             </td>
                             <td class="no-print">
-                                <form method="POST" action="" class="d-inline" onsubmit="return confirm('Delete this entry?');">
-                                    <input type="hidden" name="entry_id" value="<?= $entry['id'] ?>">
-                                    <button type="submit" name="delete_entry" class="btn btn-outline-danger btn-sm" title="Delete">
-                                        <i class="bi bi-trash"></i>
+                                <div class="d-flex gap-1">
+                                    <button type="button" class="btn btn-outline-primary btn-sm" title="Edit Entry" onclick='openEditEntryModal(<?= htmlspecialchars(json_encode([
+                                        'id' => intval($entry['id']),
+                                        'entry_type' => $entry['entry_type'],
+                                        'customer_name' => $entry['customer_name'],
+                                        'amount' => floatval($entry['amount']),
+                                        'entry_date' => $entry['entry_date'],
+                                        'description' => $entry['description'] ?? ''
+                                    ]), ENT_QUOTES, 'UTF-8') ?>)'>
+                                        <i class="bi bi-pencil-square"></i>
                                     </button>
-                                </form>
+                                    <form method="POST" action="" class="d-inline" onsubmit="return confirm('Delete this entry?');">
+                                        <input type="hidden" name="entry_id" value="<?= $entry['id'] ?>">
+                                        <button type="submit" name="delete_entry" class="btn btn-outline-danger btn-sm" title="Delete">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </form>
+                                </div>
                             </td>
                         </tr>
                         <?php endforeach; ?>
@@ -344,7 +292,17 @@ require_once __DIR__ . '/includes/header.php';
                     <?php if (!empty($entry['description'])): ?>
                     <div class="entry-card-desc"><?= sanitize($entry['description']) ?></div>
                     <?php endif; ?>
-                    <div class="entry-card-actions no-print">
+                    <div class="entry-card-actions no-print d-flex gap-1 justify-content-end mt-2">
+                        <button type="button" class="btn btn-outline-primary btn-sm" onclick='openEditEntryModal(<?= htmlspecialchars(json_encode([
+                            'id' => intval($entry['id']),
+                            'entry_type' => $entry['entry_type'],
+                            'customer_name' => $entry['customer_name'],
+                            'amount' => floatval($entry['amount']),
+                            'entry_date' => $entry['entry_date'],
+                            'description' => $entry['description'] ?? ''
+                        ]), ENT_QUOTES, 'UTF-8') ?>)'>
+                            <i class="bi bi-pencil-square"></i> Edit
+                        </button>
                         <form method="POST" action="" class="d-inline" onsubmit="return confirm('Delete this entry?');">
                             <input type="hidden" name="entry_id" value="<?= $entry['id'] ?>">
                             <button type="submit" name="delete_entry" class="btn btn-outline-danger btn-sm">
@@ -361,167 +319,137 @@ require_once __DIR__ . '/includes/header.php';
     </div>
 </div>
 
-<!-- Quick Add Customer Modal -->
-<div class="modal fade" id="quickAddModal" tabindex="-1">
-  <div class="modal-dialog modal-sm">
+<!-- Edit Entry Modal -->
+<div class="modal fade" id="editEntryModal" tabindex="-1" aria-labelledby="editEntryModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title"><i class="bi bi-person-plus"></i> New Customer</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <div class="mb-3">
-          <label class="form-label">Name</label>
-          <input type="text" id="quickCustName" class="form-control" readonly style="background:#f0f0f0;">
+      <form method="POST" action="" id="editEntryForm">
+        <input type="hidden" name="edit_entry" value="1">
+        <input type="hidden" name="entry_id" id="edit_entry_id" value="">
+        <input type="hidden" name="redirect_query" id="edit_redirect_query" value="">
+        
+        <div class="modal-header">
+          <h5 class="modal-title" id="editEntryModalLabel"><i class="bi bi-pencil-square"></i> Edit Cash Entry</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
-        <div class="mb-3">
-          <label class="form-label">Phone</label>
-          <input type="text" id="quickCustPhone" class="form-control" placeholder="03XX-XXXXXXX">
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label fw-bold">Customer Name *</label>
+            <input type="text" name="customer_name" id="edit_customer_name" class="form-control" list="customerDatalist" placeholder="Customer name..." required autocomplete="off">
+            <datalist id="customerDatalist">
+                <?php foreach ($allCustomers as $cn): ?>
+                    <option value="<?= sanitize($cn) ?>">
+                <?php endforeach; ?>
+            </datalist>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-bold">Entry Type</label>
+            <div class="d-flex gap-3 flex-wrap">
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="entry_type" id="editTypeCashIn" value="cash_in" checked onchange="updateEditFormColor()">
+                <label class="form-check-label fw-bold text-success" for="editTypeCashIn"><i class="bi bi-arrow-down-circle"></i> Cash In</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="entry_type" id="editTypeCashOut" value="cash_out" onchange="updateEditFormColor()">
+                <label class="form-check-label fw-bold text-danger" for="editTypeCashOut"><i class="bi bi-arrow-up-circle"></i> Cash Out</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="entry_type" id="editTypeAdjustment" value="adjustment" onchange="updateEditFormColor()">
+                <label class="form-check-label fw-bold" for="editTypeAdjustment" style="color:#e67e22;"><i class="bi bi-sliders"></i> Adjustment</label>
+              </div>
+            </div>
+
+            <div id="editAdjustmentDir" class="mt-2" style="display:none;">
+              <label class="form-label fw-bold small text-muted">Direction</label>
+              <div class="d-flex gap-4">
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="adjustment_direction" id="editAdjIn" value="in" checked>
+                  <label class="form-check-label fw-bold text-success" for="editAdjIn"><i class="bi bi-plus-circle"></i> Increase (+)</label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="adjustment_direction" id="editAdjOut" value="out">
+                  <label class="form-check-label fw-bold text-danger" for="editAdjOut"><i class="bi bi-dash-circle"></i> Decrease (-)</label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-bold">Amount *</label>
+            <div class="input-group">
+              <span class="input-group-text">PKR</span>
+              <input type="number" name="amount" id="edit_amount" class="form-control" step="0.01" min="0.01" placeholder="0.00" required>
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-bold">Date *</label>
+            <input type="date" name="entry_date" id="edit_entry_date" class="form-control" required>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-bold">Description (optional)</label>
+            <input type="text" name="description" id="edit_description" class="form-control" placeholder="Note or reference...">
+          </div>
         </div>
-        <div class="mb-3">
-          <label class="form-label">Opening Balance</label>
-          <input type="number" id="quickCustOpening" class="form-control" step="0.01" value="0">
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" id="editSubmitBtn" class="btn btn-success">
+            <i class="bi bi-check-circle"></i> Update Entry
+          </button>
         </div>
-        <div id="quickAddMsg" style="font-size:0.85rem;"></div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-primary" onclick="saveQuickCustomer()"><i class="bi bi-save"></i> Save</button>
-      </div>
+      </form>
     </div>
   </div>
 </div>
 
 <script>
-function saveQuickCustomer() {
-    var name = document.getElementById('quickCustName').value.trim();
-    var phone = document.getElementById('quickCustPhone').value.trim();
-    var opening = document.getElementById('quickCustOpening').value;
-    var msg = document.getElementById('quickAddMsg');
-    if (!name) { msg.innerHTML = '<span style="color:red;">Name required</span>'; return; }
-    
-    var xhr = new XMLHttpRequest();
-    xhr.open('POST', 'ajax-add-customer.php', true);
-    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-    xhr.onload = function() {
-        if (xhr.status === 200) {
-            var res = JSON.parse(xhr.responseText);
-            if (res.success) {
-                msg.innerHTML = '<span style="color:#28b463;">Customer added!</span>';
-                customerDb.push(name);
-                custField.value = name;
-                custSuggestions.style.display = 'none';
-                recomputeNewCust();
-                setTimeout(function() {
-                    var modal = bootstrap.Modal.getInstance(document.getElementById('quickAddModal'));
-                    if (modal) modal.hide();
-                }, 500);
-            } else {
-                msg.innerHTML = '<span style="color:red;">' + res.error + '</span>';
-            }
-        }
-    };
-    xhr.send('name=' + encodeURIComponent(name) + '&phone=' + encodeURIComponent(phone) + '&opening=' + encodeURIComponent(opening));
-}
+function openEditEntryModal(data) {
+    document.getElementById('edit_entry_id').value = data.id;
+    document.getElementById('edit_customer_name').value = data.customer_name;
+    document.getElementById('edit_amount').value = data.amount;
+    document.getElementById('edit_entry_date').value = data.entry_date;
+    document.getElementById('edit_description').value = data.description || '';
+    document.getElementById('edit_redirect_query').value = window.location.search.replace('?', '');
 
-var customerDb = <?= json_encode($customers) ?>;
-var custField = document.getElementById('customerNameInput');
-var custStatus = document.getElementById('customerStatus');
-var custSuggestions = document.getElementById('custSuggestions');
-
-function isExistingCustomer(val) {
-    val = val.trim().toLowerCase();
-    if (!val) return true;
-    for (var i = 0; i < customerDb.length; i++) {
-        if (customerDb[i].toLowerCase() === val) return true;
+    if (data.entry_type === 'cash_in') {
+        document.getElementById('editTypeCashIn').checked = true;
+    } else if (data.entry_type === 'cash_out') {
+        document.getElementById('editTypeCashOut').checked = true;
+    } else if (data.entry_type === 'adjustment_in') {
+        document.getElementById('editTypeAdjustment').checked = true;
+        document.getElementById('editAdjIn').checked = true;
+    } else if (data.entry_type === 'adjustment_out') {
+        document.getElementById('editTypeAdjustment').checked = true;
+        document.getElementById('editAdjOut').checked = true;
     }
-    return false;
-}
+    updateEditFormColor();
 
-function showSuggestions(val) {
-    if (!val || val.length === 0) {
-        custSuggestions.style.display = 'none';
-        return;
-    }
-    var matches = customerDb.filter(function(name) {
-        return name.toLowerCase().indexOf(val.toLowerCase()) > -1;
-    });
-    if (matches.length === 0) {
-        custSuggestions.style.display = 'none';
-        return;
-    }
-    var html = '';
-    for (var i = 0; i < matches.length; i++) {
-        html += '<div style="padding:7px 12px; cursor:pointer; font-size:0.88rem; border-bottom:1px solid #f0f0f0;" onmousedown="selectCustSuggestion(\'' + matches[i].replace(/'/g, "\\'") + '\')">' + matches[i] + '</div>';
-    }
-    custSuggestions.innerHTML = html;
-    custSuggestions.style.display = 'block';
-}
-
-function selectCustSuggestion(name) {
-    custField.value = name;
-    custSuggestions.style.display = 'none';
-    recomputeNewCust();
-}
-
-function recomputeNewCust() {
-    var v = custField.value.trim();
-    var exists = isExistingCustomer(v);
-    if (v === '') {
-        custStatus.innerHTML = '';
-    } else if (exists) {
-        custStatus.innerHTML = '<span style=\"color:#28b463;\">&#10003; Existing customer</span>';
-    } else {
-        custStatus.innerHTML = '<span style=\"color:#e74c3c;\">Customer not found </span>'
-            + '<a href=\"#\" onclick=\"event.preventDefault();openQuickAdd();\" class=\"btn btn-sm btn-outline-warning\" style=\"font-size:0.8rem; padding:1px 8px;\">'
-            + '<i class=\"bi bi-plus-circle\"></i> Add</a>';
-    }
-}
-
-function openQuickAdd() {
-    document.getElementById('quickCustName').value = custField.value.trim();
-    document.getElementById('quickCustPhone').value = '';
-    document.getElementById('quickCustOpening').value = '0';
-    var modal = new bootstrap.Modal(document.getElementById('quickAddModal'));
+    var modalEl = document.getElementById('editEntryModal');
+    var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
     modal.show();
 }
 
-custField.addEventListener('input', function() {
-    showSuggestions(custField.value.trim());
-    recomputeNewCust();
-});
-
-document.addEventListener('click', function(e) {
-    if (!e.target.closest('.customer-field')) {
-        custSuggestions.style.display = 'none';
-    }
-});
-
-function updateFormColor() {
-    var isIn = document.getElementById('typeCashIn').checked;
-    var isOut = document.getElementById('typeCashOut').checked;
-    var isAdj = document.getElementById('typeAdjustment').checked;
-    var btn = document.getElementById('submitBtn');
-    var adjDir = document.getElementById('adjustmentDir');
-    var custFlds = document.querySelectorAll('.customer-field');
-    var descFlds = document.querySelectorAll('.desc-field');
+function updateEditFormColor() {
+    var isIn = document.getElementById('editTypeCashIn').checked;
+    var isOut = document.getElementById('editTypeCashOut').checked;
+    var isAdj = document.getElementById('editTypeAdjustment').checked;
+    var btn = document.getElementById('editSubmitBtn');
+    var adjDir = document.getElementById('editAdjustmentDir');
 
     if (isAdj) {
         adjDir.style.display = 'block';
-        btn.className = 'btn btn-warning';
-        btn.innerHTML = '<i class=\"bi bi-sliders\"></i> Save';
-        custFlds.forEach(function(el) { el.style.display = 'none'; });
+        btn.className = 'btn btn-warning text-white';
+        btn.innerHTML = '<i class="bi bi-sliders"></i> Update Adjustment';
     } else {
         adjDir.style.display = 'none';
-        custFlds.forEach(function(el) { el.style.display = ''; });
-        descFlds.forEach(function(el) { el.style.display = ''; });
-        recomputeNewCust();
         if (isIn) {
             btn.className = 'btn btn-success';
-            btn.innerHTML = '<i class=\"bi bi-arrow-down-circle\"></i> Save';
+            btn.innerHTML = '<i class="bi bi-check-circle"></i> Update Cash In';
         } else {
             btn.className = 'btn btn-danger';
-            btn.innerHTML = '<i class=\"bi bi-arrow-up-circle\"></i> Save';
+            btn.innerHTML = '<i class="bi bi-check-circle"></i> Update Cash Out';
         }
     }
 }

@@ -22,6 +22,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['quick_add_customer'])
     exit;
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_customer_entry'])) {
+    $customerId   = intval($_POST['customer_id'] ?? 0);
+    $customerName = trim($_POST['customer_name'] ?? '');
+    $entryType    = $_POST['entry_type'] ?? 'cash_in';
+    $amount       = floatval($_POST['amount'] ?? 0);
+    $entryDate    = $_POST['entry_date'] ?? getTodayDate();
+    $description  = trim($_POST['description'] ?? '');
+
+    if ($customerId > 0 && empty($customerName)) {
+        $cstmt = $pdo->prepare("SELECT name FROM customers WHERE id = ?");
+        $cstmt->execute([$customerId]);
+        $cRow = $cstmt->fetch();
+        if ($cRow) {
+            $customerName = $cRow['name'];
+        }
+    }
+
+    if ($entryType === 'adjustment') {
+        $adjustDir = $_POST['adjustment_direction'] ?? 'in';
+        $entryType = ($adjustDir === 'in') ? 'adjustment_in' : 'adjustment_out';
+    }
+
+    if ($amount > 0 && ($customerId > 0 || $customerName !== '')) {
+        $stmt = $pdo->prepare("INSERT INTO cash_entries (entry_type, customer_name, customer_id, amount, entry_date, description) VALUES (?, ?, ?, ?, ?, ?)");
+        $stmt->execute([$entryType, $customerName, $customerId ?: null, $amount, $entryDate, $description]);
+
+        $typeLabel = 'Cash In';
+        if ($entryType === 'cash_out') $typeLabel = 'Cash Out';
+        elseif ($entryType === 'adjustment_in') $typeLabel = 'Adjustment (+)';
+        elseif ($entryType === 'adjustment_out') $typeLabel = 'Adjustment (-)';
+
+        setFlash('success', "$typeLabel of " . formatCurrency($amount) . " saved for \"" . sanitize($customerName) . "\".");
+    } else {
+        setFlash('error', 'Please enter a valid amount.');
+    }
+
+    $redirect = !empty($_POST['redirect_url']) ? $_POST['redirect_url'] : 'customers.php';
+    header('Location: ' . $redirect);
+    exit;
+}
+
 $allCustomers = getAllCustomers();
 
 $customerInfo = null;
@@ -60,25 +101,31 @@ require_once __DIR__ . '/includes/header.php';
 
 <div class="content-wrapper">
     <div class="page-header">
-        <h2 style="width:100%;">
-
-            <span style="margin-left:auto; display:flex; gap:6px;">
-                <?php if ($customerInfo): ?>
-                <a href="customers.php" class="btn btn-outline-secondary btn-sm">
-                    <i class="bi bi-arrow-left"></i> All Customers
-                </a>
-                <a href="print-customers.php?id=<?= $customerInfo['id'] ?>" class="btn btn-print btn-sm" target="_blank">
-                    <i class="bi bi-printer"></i> Print
-                </a>
-                <?php endif; ?>
-                <a href="index.php" class="btn btn-outline-primary btn-sm">
-                    <i class="bi bi-speedometer2"></i> Dashboard
-                </a>
-                <a href="cash-book.php" class="btn btn-outline-success btn-sm">
-                    <i class="bi bi-journal-bookmark"></i> Cash Book
-                </a>
-            </span>
+        <h2>
+            <i class="bi bi-people"></i> <?= $customerInfo ? sanitize($customerInfo['name']) . ' - Ledger' : 'Customers' ?>
         </h2>
+        <div class="header-actions">
+            <?php if ($customerInfo): ?>
+            <button type="button" class="btn btn-success btn-sm" onclick="openCustomerEntryModal(<?= intval($customerInfo['id']) ?>, <?= htmlspecialchars(json_encode($customerInfo['name']), ENT_QUOTES, 'UTF-8') ?>)">
+                <i class="bi bi-plus-circle"></i> New Entry
+            </button>
+            <a href="customers.php" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-arrow-left"></i> All Customers
+            </a>
+            <a href="print-customers.php?id=<?= $customerInfo['id'] ?>" class="btn btn-print btn-sm" target="_blank">
+                <i class="bi bi-printer"></i> Print
+            </a>
+            <?php endif; ?>
+            <a href="index.php" class="btn btn-outline-primary btn-sm">
+                <i class="bi bi-speedometer2"></i> Dashboard
+            </a>
+            <a href="cash-book.php" class="btn btn-outline-success btn-sm">
+                <i class="bi bi-journal-bookmark"></i> Cash Book
+            </a>
+            <a href="closings-history.php" class="btn btn-outline-warning btn-sm">
+                <i class="bi bi-journal-check"></i> Closing History
+            </a>
+        </div>
     </div>
 
     <?php if ($customerInfo): ?>
@@ -249,9 +296,14 @@ require_once __DIR__ . '/includes/header.php';
                                 <?= formatCurrency(abs($bal)) ?>
                             </td>
                             <td>
-                                <a href="customers.php?id=<?= intval($cust['id']) ?>" class="btn btn-outline-info btn-sm">
-                                    <i class="bi bi-book"></i> Ledger
-                                </a>
+                                <div class="d-flex gap-1 flex-wrap">
+                                    <button type="button" class="btn btn-outline-success btn-sm" onclick="openCustomerEntryModal(<?= intval($cust['id']) ?>, <?= htmlspecialchars(json_encode($cust['name']), ENT_QUOTES, 'UTF-8') ?>)">
+                                        <i class="bi bi-plus-circle"></i> Entry
+                                    </button>
+                                    <a href="customers.php?id=<?= intval($cust['id']) ?>" class="btn btn-outline-info btn-sm">
+                                        <i class="bi bi-book"></i> Ledger
+                                    </a>
+                                </div>
                             </td>
                         </tr>
                         <?php endforeach; ?>
@@ -262,6 +314,90 @@ require_once __DIR__ . '/includes/header.php';
         </div>
     </div>
     <?php endif; ?>
+</div>
+
+<!-- Customer Entry Modal -->
+<div class="modal fade" id="customerEntryModal" tabindex="-1" aria-labelledby="customerEntryModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form method="POST" action="customers.php" id="customerEntryForm">
+        <input type="hidden" name="add_customer_entry" value="1">
+        <input type="hidden" name="customer_id" id="modal_entry_customer_id" value="">
+        <input type="hidden" name="customer_name" id="modal_entry_customer_name" value="">
+        <input type="hidden" name="redirect_url" id="modal_entry_redirect_url" value="">
+        
+        <div class="modal-header">
+          <h5 class="modal-title" id="customerEntryModalLabel"><i class="bi bi-journal-plus"></i> Customer Entry</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3 p-2 bg-light rounded border d-flex align-items-center">
+            <i class="bi bi-person-circle fs-4 text-primary me-2"></i>
+            <div>
+              <div class="text-muted small">Customer Name</div>
+              <strong id="modalCustomerNameDisplay" class="text-dark fs-6"></strong>
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-bold">Entry Type</label>
+            <div class="d-flex gap-3 flex-wrap">
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="entry_type" id="modalTypeCashIn" value="cash_in" checked onchange="updateModalFormColor()">
+                <label class="form-check-label fw-bold text-success" for="modalTypeCashIn"><i class="bi bi-arrow-down-circle"></i> Cash In</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="entry_type" id="modalTypeCashOut" value="cash_out" onchange="updateModalFormColor()">
+                <label class="form-check-label fw-bold text-danger" for="modalTypeCashOut"><i class="bi bi-arrow-up-circle"></i> Cash Out</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="entry_type" id="modalTypeAdjustment" value="adjustment" onchange="updateModalFormColor()">
+                <label class="form-check-label fw-bold" for="modalTypeAdjustment" style="color:#e67e22;"><i class="bi bi-sliders"></i> Balance Adjustment</label>
+              </div>
+            </div>
+
+            <div id="modalAdjustmentDir" class="mt-2" style="display:none;">
+              <label class="form-label fw-bold small text-muted">Direction</label>
+              <div class="d-flex gap-4">
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="adjustment_direction" id="modalAdjIn" value="in" checked>
+                  <label class="form-check-label fw-bold text-success" for="modalAdjIn"><i class="bi bi-plus-circle"></i> Increase (+)</label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="adjustment_direction" id="modalAdjOut" value="out">
+                  <label class="form-check-label fw-bold text-danger" for="modalAdjOut"><i class="bi bi-dash-circle"></i> Decrease (-)</label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-bold">Amount *</label>
+            <div class="input-group">
+              <span class="input-group-text">PKR</span>
+              <input type="number" name="amount" id="modalEntryAmount" class="form-control" step="0.01" min="0.01" placeholder="0.00" required>
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-bold">Date *</label>
+            <input type="date" name="entry_date" id="modalEntryDate" class="form-control" value="<?= date('Y-m-d') ?>" required>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-bold">Description (optional)</label>
+            <input type="text" name="description" id="modalEntryDescription" class="form-control" placeholder="Note or reference...">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" id="modalSubmitBtn" class="btn btn-success">
+            <i class="bi bi-arrow-down-circle"></i> Save Cash In
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
 </div>
 
 <div class="modal fade" id="quickAddModal" tabindex="-1">
@@ -301,6 +437,7 @@ var searchInput = document.getElementById('customerSearch');
 var searchDropdown = document.getElementById('searchDropdown');
 
 function filterCustomers() {
+  if (!searchInput) return;
   var input = searchInput.value.toLowerCase();
 
   var rows = document.querySelectorAll('.table-custom tbody tr');
@@ -309,7 +446,7 @@ function filterCustomers() {
   }
 
   if (input.length === 0) {
-    searchDropdown.style.display = 'none';
+    if (searchDropdown) searchDropdown.style.display = 'none';
     return;
   }
 
@@ -318,7 +455,7 @@ function filterCustomers() {
   });
 
   if (matches.length === 0) {
-    searchDropdown.style.display = 'none';
+    if (searchDropdown) searchDropdown.style.display = 'none';
     return;
   }
 
@@ -326,21 +463,71 @@ function filterCustomers() {
   for (var i = 0; i < matches.length; i++) {
     html += '<div class="search-suggestion" onmousedown="selectSuggestion(\'' + matches[i].replace(/'/g, "\\'") + '\')" style="padding:8px 14px; cursor:pointer; font-size:0.9rem; border-bottom:1px solid #f0f0f0;">' + matches[i] + '</div>';
   }
-  searchDropdown.innerHTML = html;
-  searchDropdown.style.display = 'block';
+  if (searchDropdown) {
+    searchDropdown.innerHTML = html;
+    searchDropdown.style.display = 'block';
+  }
 }
 
 function selectSuggestion(name) {
+  if (!searchInput) return;
   searchInput.value = name;
-  searchDropdown.style.display = 'none';
+  if (searchDropdown) searchDropdown.style.display = 'none';
   filterCustomers();
 }
 
 document.addEventListener('click', function(e) {
   if (!e.target.closest('#customerSearch') && !e.target.closest('#searchDropdown')) {
-    searchDropdown.style.display = 'none';
+    if (searchDropdown) searchDropdown.style.display = 'none';
   }
 });
+
+function openCustomerEntryModal(id, name) {
+  document.getElementById('modal_entry_customer_id').value = id;
+  document.getElementById('modal_entry_customer_name').value = name;
+  document.getElementById('modalCustomerNameDisplay').textContent = name;
+  document.getElementById('modal_entry_redirect_url').value = window.location.href;
+  
+  // reset inputs
+  document.getElementById('modalEntryAmount').value = '';
+  document.getElementById('modalEntryDate').value = '<?= date('Y-m-d') ?>';
+  document.getElementById('modalEntryDescription').value = '';
+  document.getElementById('modalTypeCashIn').checked = true;
+  document.getElementById('modalAdjIn').checked = true;
+  updateModalFormColor();
+  
+  var modalEl = document.getElementById('customerEntryModal');
+  var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+  modal.show();
+  setTimeout(function() {
+    var amtInput = document.getElementById('modalEntryAmount');
+    if (amtInput) amtInput.focus();
+  }, 400);
+}
+
+function updateModalFormColor() {
+  var isIn = document.getElementById('modalTypeCashIn').checked;
+  var isOut = document.getElementById('modalTypeCashOut').checked;
+  var isAdj = document.getElementById('modalTypeAdjustment').checked;
+  var btn = document.getElementById('modalSubmitBtn');
+  var adjDir = document.getElementById('modalAdjustmentDir');
+
+  if (isAdj) {
+    adjDir.style.display = 'block';
+    btn.className = 'btn btn-warning text-white';
+    btn.innerHTML = '<i class="bi bi-sliders"></i> Save Adjustment';
+  } else {
+    adjDir.style.display = 'none';
+    if (isIn) {
+      btn.className = 'btn btn-success';
+      btn.innerHTML = '<i class="bi bi-arrow-down-circle"></i> Save Cash In';
+    } else {
+      btn.className = 'btn btn-danger';
+      btn.innerHTML = '<i class="bi bi-arrow-up-circle"></i> Save Cash Out';
+    }
+  }
+}
 </script>
 
 <?php require_once __DIR__ . '/includes/footer.php'; ?>
+

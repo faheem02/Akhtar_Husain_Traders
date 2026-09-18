@@ -37,21 +37,10 @@ function getTodayDate() {
 function getOpeningBalance($date) {
     global $pdo;
 
-    $stmt = $pdo->prepare("SELECT opening_date, opening_balance FROM daily_opening WHERE opening_date <= ? ORDER BY opening_date DESC LIMIT 1");
+    $stmt = $pdo->prepare("SELECT opening_balance FROM daily_opening WHERE opening_date = ?");
     $stmt->execute([$date]);
     $row = $stmt->fetch();
-    $baseBalance = $row ? floatval($row['opening_balance']) : 0;
-
-    $baseDate = $row ? $row['opening_date'] : '2000-01-01';
-
-    $stmt2 = $pdo->prepare("SELECT 
-        COALESCE(SUM(CASE WHEN entry_type IN ('cash_in','adjustment_in') THEN amount ELSE 0 END), 0) as total_in,
-        COALESCE(SUM(CASE WHEN entry_type IN ('cash_out','adjustment_out') THEN amount ELSE 0 END), 0) as total_out
-        FROM cash_entries WHERE entry_date >= ? AND entry_date < ?");
-    $stmt2->execute([$baseDate, $date]);
-    $row2 = $stmt2->fetch();
-
-    return round($baseBalance + $row2['total_in'] - $row2['total_out'], 2);
+    return $row ? floatval($row['opening_balance']) : 0.00;
 }
 
 function getClosingBalance($date) {
@@ -68,6 +57,40 @@ function getClosingBalance($date) {
 
     return round($opening + $row['total_in'] - $row['total_out'], 2);
 }
+
+function saveDailyClosing($date, $opening, $totalIn, $totalOut, $closing, $notes = '') {
+    global $pdo;
+
+    $check = $pdo->prepare("SELECT id FROM daily_closings WHERE closing_date = ?");
+    $check->execute([$date]);
+    if ($check->fetch()) {
+        $stmt = $pdo->prepare("UPDATE daily_closings SET opening_balance = ?, total_in = ?, total_out = ?, closing_balance = ?, closed_at = NOW(), notes = ? WHERE closing_date = ?");
+        return $stmt->execute([$opening, $totalIn, $totalOut, $closing, $notes, $date]);
+    } else {
+        $stmt = $pdo->prepare("INSERT INTO daily_closings (closing_date, opening_balance, total_in, total_out, closing_balance, closed_at, notes) VALUES (?, ?, ?, ?, ?, NOW(), ?)");
+        return $stmt->execute([$date, $opening, $totalIn, $totalOut, $closing, $notes]);
+    }
+}
+
+function getDailyClosings($limit = 30) {
+    global $pdo;
+    $limit = intval($limit);
+    $stmt = $pdo->prepare("SELECT * FROM daily_closings ORDER BY closing_date DESC, closed_at DESC LIMIT " . $limit);
+    $stmt->execute();
+    return $stmt->fetchAll();
+}
+
+function getDayClosingRecord($date) {
+    global $pdo;
+    $stmt = $pdo->prepare("SELECT * FROM daily_closings WHERE closing_date = ?");
+    $stmt->execute([$date]);
+    return $stmt->fetch();
+}
+
+function isDayClosed($date) {
+    return getDayClosingRecord($date) !== false;
+}
+
 
 function getTodaySummary($date) {
     global $pdo;
@@ -143,10 +166,15 @@ function getCustomerLedger($customerId, $from = '', $to = '') {
 
 function getLatestClosingBalance() {
     global $pdo;
-    $stmt = $pdo->query("SELECT opening_date FROM daily_opening ORDER BY opening_date DESC LIMIT 1");
+    $stmt = $pdo->query("SELECT closing_balance FROM daily_closings ORDER BY closing_date DESC, closed_at DESC LIMIT 1");
     $row = $stmt->fetch();
     if ($row) {
-        return getClosingBalance($row['opening_date']);
+        return floatval($row['closing_balance']);
+    }
+    $stmt2 = $pdo->query("SELECT opening_date FROM daily_opening ORDER BY opening_date DESC LIMIT 1");
+    $row2 = $stmt2->fetch();
+    if ($row2) {
+        return getClosingBalance($row2['opening_date']);
     }
     return 0;
 }

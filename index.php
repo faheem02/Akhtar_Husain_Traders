@@ -3,28 +3,30 @@ $pageTitle = 'Dashboard';
 require_once __DIR__ . '/includes/functions.php';
 requireLogin();
 
+$today = getTodayDate();
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['close_day'])) {
-    $today = getTodayDate();
-    $tomorrow = date('Y-m-d', strtotime($today . ' +1 day'));
+    $todayOpening = getOpeningBalance($today);
     $todayClosing = getClosingBalance($today);
+    $todaySummary = getTodaySummary($today);
+    $notes        = trim($_POST['closing_notes'] ?? '');
 
-    $check = $pdo->prepare("SELECT id FROM daily_opening WHERE opening_date = ?");
-    $check->execute([$tomorrow]);
-    if ($check->fetch()) {
-        $stmt = $pdo->prepare("UPDATE daily_opening SET opening_balance = ? WHERE opening_date = ?");
-        $stmt->execute([$todayClosing, $tomorrow]);
-    } else {
-        $stmt = $pdo->prepare("INSERT INTO daily_opening (opening_date, opening_balance) VALUES (?, ?)");
-        $stmt->execute([$tomorrow, $todayClosing]);
-    }
+    saveDailyClosing(
+        $today,
+        $todayOpening,
+        floatval($todaySummary['total_in']),
+        floatval($todaySummary['total_out']),
+        $todayClosing,
+        $notes
+    );
 
-    setFlash('success', "Day closed! " . formatCurrency($todayClosing) . " saved as " . date('d M Y', strtotime($tomorrow)) . " opening.");
+    setFlash('success', "Day closed successfully! Closing balance of " . formatCurrency($todayClosing) . " saved to Closing History.");
     header('Location: index.php');
     exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['set_opening'])) {
-    $openingDate = $_POST['opening_date'] ?? getTodayDate();
+    $openingDate   = $_POST['opening_date'] ?? getTodayDate();
     $openingAmount = floatval($_POST['opening_amount'] ?? 0);
 
     $check = $pdo->prepare("SELECT id FROM daily_opening WHERE opening_date = ?");
@@ -44,20 +46,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['set_opening'])) {
 
 require_once __DIR__ . '/includes/header.php';
 
-$today = getTodayDate();
-// Auto carry-forward: if no daily_opening record for today, create one from yesterday's closing
-$checkToday = $pdo->prepare("SELECT id FROM daily_opening WHERE opening_date = ?");
-$checkToday->execute([$today]);
-if (!$checkToday->fetch()) {
-    $yesterday = date('Y-m-d', strtotime($today . ' -1 day'));
-    $yesterdayClosing = getClosingBalance($yesterday);
-    $stmt = $pdo->prepare("INSERT INTO daily_opening (opening_date, opening_balance) VALUES (?, ?)");
-    $stmt->execute([$today, $yesterdayClosing]);
-}
-
 $summary = getTodaySummary($today);
 $openingBalance = getOpeningBalance($today);
 $closingBalance = getClosingBalance($today);
+$todayClosed = getDayClosingRecord($today);
+$closingHistory = getDailyClosings(5);
 
 $stmt = $pdo->prepare("SELECT * FROM cash_entries WHERE entry_date = ? ORDER BY created_at DESC LIMIT 10");
 $stmt->execute([$today]);
@@ -66,18 +59,21 @@ $recentEntries = $stmt->fetchAll();
 
 <div class="content-wrapper">
     <div class="page-header">
-        <h2 style="width:100%;">
+        <h2>
             <i class="bi bi-speedometer2"></i> Dashboard
-            <span style="margin-left:auto; display:flex; gap:6px; align-items:center;">
-                <a href="cash-book.php" class="btn btn-outline-success btn-sm">
-                    <i class="bi bi-journal-bookmark"></i> Cash Book
-                </a>
-                <a href="customers.php" class="btn btn-outline-info btn-sm">
-                    <i class="bi bi-people"></i> Customers
-                </a>
-                <span class="text-muted" style="font-size:0.85rem; white-space:nowrap;"><?= date('l, d M Y') ?></span>
-            </span>
         </h2>
+        <div class="header-actions">
+            <a href="cash-book.php" class="btn btn-outline-success btn-sm">
+                <i class="bi bi-journal-bookmark"></i> Cash Book
+            </a>
+            <a href="customers.php" class="btn btn-outline-info btn-sm">
+                <i class="bi bi-people"></i> Customers
+            </a>
+            <a href="closings-history.php" class="btn btn-outline-warning btn-sm">
+                <i class="bi bi-journal-check"></i> Closing History
+            </a>
+            <span class="text-muted d-none d-md-inline" style="font-size:0.85rem; white-space:nowrap; padding-left:4px;"><?= date('l, d M Y') ?></span>
+        </div>
     </div>
 
     <!-- Summary Cards -->
@@ -128,40 +124,63 @@ $recentEntries = $stmt->fetchAll();
         </div>
     </div>
 
-    <!-- Quick Actions + Close Today -->
+    <!-- Quick Actions + Today's Opening + End of Day -->
     <div class="row g-3 mb-4">
         <div class="col-md-4">
-            <div class="card-custom">
+            <div class="card-custom h-100">
                 <div class="card-header"><i class="bi bi-lightning"></i> Quick Actions</div>
-                <div class="card-body">
-                    <a href="cash-book.php" class="btn btn-success w-100 mb-2">
-                        <i class="bi bi-plus-circle"></i> New Entry
+                <div class="card-body d-flex flex-column justify-content-center">
+                    <a href="customers.php" class="btn btn-success w-100 mb-2">
+                        <i class="bi bi-person-plus"></i> Customer Entry (Add Entry)
+                    </a>
+                    <a href="cash-book.php" class="btn btn-outline-success w-100 mb-2">
+                        <i class="bi bi-journal-bookmark"></i> View Cash Book
+                    </a>
+                    <a href="closings-history.php" class="btn btn-outline-warning w-100 mb-2 text-dark">
+                        <i class="bi bi-journal-check"></i> View Closing History
                     </a>
                     <a href="print-cashbook.php?from=<?= $today ?>&to=<?= $today ?>" class="btn btn-print w-100" target="_blank">
-                        <i class="bi bi-printer"></i> Print Cash Book
+                        <i class="bi bi-printer"></i> Print Today's Cash Book
                     </a>
                 </div>
             </div>
         </div>
 
         <div class="col-md-4">
-            <div class="report-section text-center" style="border: 2px solid #27ae60;">
+            <div class="report-section text-center h-100 d-flex flex-column justify-content-center" style="border: 2px solid #27ae60;">
                 <h5 style="color: #27ae60;"><i class="bi bi-sunrise"></i> Today's Opening</h5>
                 <div style="font-size: 1.5rem; font-weight: 800; color: #27ae60;"><?= formatCurrency($openingBalance) ?></div>
                 <small class="text-muted"><?= date('l, d M Y') ?></small>
+                <div class="mt-2 text-muted" style="font-size:0.8rem;">
+                    <?= $openingBalance > 0 ? 'Manually set opening' : 'Default opening (0.00)' ?>
+                </div>
             </div>
         </div>
 
         <div class="col-md-4">
-            <div class="report-section text-center" style="border: 2px solid #1a5276;">
-                <form method="POST" action="" onsubmit="return confirm('Close today? Tomorrow\'s opening will be set to <?= formatCurrency($closingBalance) ?>');">
+            <div class="report-section text-center h-100 d-flex flex-column justify-content-center" style="border: 2px solid #1a5276;">
+                <form method="POST" action="" onsubmit="return confirm('Close today? Closing balance of <?= formatCurrency($closingBalance) ?> will be saved to history.');">
                     <h5><i class="bi bi-lock"></i> End of Day</h5>
-                    <div style="font-size: 0.9rem; color: #666; margin-bottom: 10px;">
-                        Save today's closing as tomorrow's opening
-                    </div>
-                    <button type="submit" name="close_day" class="btn btn-primary btn-lg">
-                        <i class="bi bi-check2-circle"></i> Close Today (<?= formatCurrency($closingBalance) ?>)
-                    </button>
+                    <?php if ($todayClosed): ?>
+                        <div class="mb-2">
+                            <span class="badge bg-success" style="font-size:0.85rem;">
+                                <i class="bi bi-check2-circle"></i> Closed at <?= date('h:i A', strtotime($todayClosed['closed_at'])) ?>
+                            </span>
+                        </div>
+                        <div style="font-size: 0.85rem; color: #666; margin-bottom: 10px;">
+                            Saved Closing: <strong><?= formatCurrency($todayClosed['closing_balance']) ?></strong>
+                        </div>
+                        <button type="submit" name="close_day" class="btn btn-outline-primary btn-sm">
+                            <i class="bi bi-arrow-repeat"></i> Update Closing (<?= formatCurrency($closingBalance) ?>)
+                        </button>
+                    <?php else: ?>
+                        <div style="font-size: 0.85rem; color: #666; margin-bottom: 10px;">
+                            Save today's closing balance to permanent history
+                        </div>
+                        <button type="submit" name="close_day" class="btn btn-primary btn-lg">
+                            <i class="bi bi-check2-circle"></i> Close Today (<?= formatCurrency($closingBalance) ?>)
+                        </button>
+                    <?php endif; ?>
                 </form>
             </div>
         </div>
@@ -169,7 +188,7 @@ $recentEntries = $stmt->fetchAll();
 
     <!-- Set Opening Balance -->
     <div class="card-custom mb-4">
-        <div class="card-header"><i class="bi bi-pencil-square"></i> Set Opening Balance</div>
+        <div class="card-header"><i class="bi bi-pencil-square"></i> Set Opening Balance (Optional)</div>
         <div class="card-body">
             <form method="POST" action="" class="row g-2 align-items-end">
                 <div class="col-md-3 col-6">
@@ -177,13 +196,69 @@ $recentEntries = $stmt->fetchAll();
                     <input type="date" name="opening_date" class="form-control" value="<?= $today ?>" required>
                 </div>
                 <div class="col-md-3 col-6">
-                    <label class="form-label">Amount</label>
-                    <input type="number" name="opening_amount" class="form-control" step="0.01" value="0" min="0" required>
+                    <label class="form-label">Opening Amount</label>
+                    <input type="number" name="opening_amount" class="form-control" step="0.01" value="<?= $openingBalance ?>" min="0" required>
                 </div>
                 <div class="col-md-3 col-12">
                     <button type="submit" name="set_opening" class="btn btn-warning"><i class="bi bi-check-circle"></i> Save Opening Balance</button>
                 </div>
             </form>
+            <div class="form-text mt-1 text-muted" style="font-size:0.8rem;">
+                Agar aap opening balance 0 rakhna chahte hain to 0 save karein ya chor dein. Naya din hamesha 0 se start hoga.
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Daily Closings Card -->
+    <div class="card-custom mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-journal-check"></i> Recent Daily Closings</span>
+            <a href="closings-history.php" class="btn btn-sm btn-primary">
+                View All History & Reports <i class="bi bi-arrow-right"></i>
+            </a>
+        </div>
+        <div class="card-body">
+            <?php if (empty($closingHistory)): ?>
+            <div class="empty-state py-3">
+                <i class="bi bi-inbox" style="font-size:1.8rem;"></i>
+                <p class="mb-0 text-muted">No closing records saved yet. Click "Close Today" to save end-of-day balance.</p>
+            </div>
+            <?php else: ?>
+            <div class="table-responsive">
+                <table class="table-custom table">
+                    <thead>
+                        <tr>
+                            <th>Closing Date</th>
+                            <th>Opening</th>
+                            <th>Total Cash In</th>
+                            <th>Total Cash Out</th>
+                            <th>Closing Balance</th>
+                            <th>Closed At</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($closingHistory as $ch): ?>
+                        <tr>
+                            <td><strong><?= date('d M Y', strtotime($ch['closing_date'])) ?></strong></td>
+                            <td class="amount-cell"><?= formatCurrency($ch['opening_balance']) ?></td>
+                            <td class="amount-cell amount-in"><?= formatCurrency($ch['total_in']) ?></td>
+                            <td class="amount-cell amount-out"><?= formatCurrency($ch['total_out']) ?></td>
+                            <td class="amount-cell" style="font-weight:700; color:#1a5276;">
+                                <?= formatCurrency($ch['closing_balance']) ?>
+                            </td>
+                            <td class="text-muted"><?= date('d M Y, h:i A', strtotime($ch['closed_at'])) ?></td>
+                            <td>
+                                <a href="cash-book.php?from=<?= $ch['closing_date'] ?>&to=<?= $ch['closing_date'] ?>" class="btn btn-outline-info btn-sm">
+                                    <i class="bi bi-eye"></i> View Day
+                                </a>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -266,3 +341,4 @@ $recentEntries = $stmt->fetchAll();
 </div>
 
 <?php require_once __DIR__ . '/includes/footer.php'; ?>
+
