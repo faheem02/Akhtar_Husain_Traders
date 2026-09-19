@@ -63,6 +63,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_customer_entry'])
     exit;
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_customer'])) {
+    $cid = intval($_POST['customer_id'] ?? 0);
+    if ($cid > 0) {
+        $cstmt = $pdo->prepare("SELECT name FROM customers WHERE id = ?");
+        $cstmt->execute([$cid]);
+        $cRow = $cstmt->fetch();
+        $cName = $cRow ? $cRow['name'] : 'Customer';
+
+        $pdo->beginTransaction();
+        try {
+            // Delete customer cash entries
+            $delEntries = $pdo->prepare("DELETE FROM cash_entries WHERE customer_id = ?");
+            $delEntries->execute([$cid]);
+
+            // Delete customer record
+            $delCust = $pdo->prepare("DELETE FROM customers WHERE id = ?");
+            $delCust->execute([$cid]);
+
+            $pdo->commit();
+            setFlash('success', 'Customer "' . sanitize($cName) . '" and all related records deleted successfully.');
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            setFlash('error', 'Error deleting customer: ' . $e->getMessage());
+        }
+    }
+    header('Location: customers.php');
+    exit;
+}
+
 $allCustomers = getAllCustomers();
 
 $customerInfo = null;
@@ -112,9 +141,9 @@ require_once __DIR__ . '/includes/header.php';
             <a href="customers.php" class="btn btn-outline-secondary btn-sm">
                 <i class="bi bi-arrow-left"></i> All Customers
             </a>
-            <a href="print-customers.php?id=<?= $customerInfo['id'] ?>" class="btn btn-print btn-sm" target="_blank">
-                <i class="bi bi-printer"></i> Print
-            </a>
+            <button type="button" class="btn btn-print btn-sm" onclick="openPrintModal(<?= intval($customerInfo['id']) ?>, <?= htmlspecialchars(json_encode($customerInfo['name']), ENT_QUOTES, 'UTF-8') ?>, '<?= sanitize($from) ?>', '<?= sanitize($to) ?>')">
+                <i class="bi bi-printer"></i> Print / Download
+            </button>
             <?php endif; ?>
             <a href="index.php" class="btn btn-outline-primary btn-sm">
                 <i class="bi bi-speedometer2"></i> Dashboard
@@ -166,11 +195,6 @@ require_once __DIR__ . '/includes/header.php';
                         <?php if ($from || $to): ?>
                         <a href="customers.php?id=<?= $customerInfo['id'] ?>" class="btn btn-outline-secondary btn-sm"><i class="bi bi-x-circle"></i> Clear</a>
                         <?php endif; ?>
-                    </div>
-                    <div class="col-md-3 col-6 d-flex gap-2">
-                        <a href="cash-book.php?customer=<?= urlencode($customerInfo['name']) ?>" class="btn btn-outline-info btn-sm">
-                            <i class="bi bi-journal-bookmark"></i> Cash Book
-                        </a>
                     </div>
                 </div>
             </form>
@@ -279,7 +303,7 @@ require_once __DIR__ . '/includes/header.php';
                             <th>Total Debit</th>
                             <th>Total Credit</th>
                             <th>Balance</th>
-                            <th>Action</th>
+                            <th class="text-center" style="white-space: nowrap; width: 1%;">Action</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -295,14 +319,17 @@ require_once __DIR__ . '/includes/header.php';
                             <td class="amount-cell" style="font-weight:700; color:<?= $bal >= 0 ? '#e74c3c' : '#28b463' ?>;">
                                 <?= formatCurrency(abs($bal)) ?>
                             </td>
-                            <td>
-                                <div class="d-flex gap-1 flex-wrap">
-                                    <button type="button" class="btn btn-outline-success btn-sm" onclick="openCustomerEntryModal(<?= intval($cust['id']) ?>, <?= htmlspecialchars(json_encode($cust['name']), ENT_QUOTES, 'UTF-8') ?>)">
-                                        <i class="bi bi-plus-circle"></i> Entry
+                            <td style="white-space: nowrap; width: 1%;">
+                                <div class="action-btn-group">
+                                    <button type="button" class="btn btn-outline-success btn-sm action-btn" onclick="openCustomerEntryModal(<?= intval($cust['id']) ?>, <?= htmlspecialchars(json_encode($cust['name']), ENT_QUOTES, 'UTF-8') ?>)" title="Add Cash Entry">
+                                        <i class="bi bi-plus-circle"></i> <span>Entry</span>
                                     </button>
-                                    <a href="customers.php?id=<?= intval($cust['id']) ?>" class="btn btn-outline-info btn-sm">
-                                        <i class="bi bi-book"></i> Ledger
+                                    <a href="customers.php?id=<?= intval($cust['id']) ?>" class="btn btn-outline-info btn-sm action-btn" title="View Customer Ledger">
+                                        <i class="bi bi-book"></i> <span>Ledger</span>
                                     </a>
+                                    <button type="button" class="btn btn-outline-danger btn-sm action-btn" onclick="confirmDeleteCustomer(<?= intval($cust['id']) ?>, <?= htmlspecialchars(json_encode($cust['name']), ENT_QUOTES, 'UTF-8') ?>)" title="Delete Customer">
+                                        <i class="bi bi-trash"></i> <span>Delete</span>
+                                    </button>
                                 </div>
                             </td>
                         </tr>
@@ -527,7 +554,116 @@ function updateModalFormColor() {
     }
   }
 }
+
+function openPrintModal(customerId, customerName, fromDate = '', toDate = '') {
+  document.getElementById('printModalCustomerName').textContent = customerName;
+  var loader = document.getElementById('previewLoader');
+  var iframe = document.getElementById('previewIframe');
+  
+  if (loader) loader.style.display = 'block';
+  if (iframe) {
+    iframe.style.display = 'none';
+    var url = 'print-customers.php?id=' + encodeURIComponent(customerId) + '&preview=1';
+    if (fromDate) url += '&from=' + encodeURIComponent(fromDate);
+    if (toDate) url += '&to=' + encodeURIComponent(toDate);
+    iframe.src = url;
+  }
+
+  var modalEl = document.getElementById('printLedgerModal');
+  var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+  modal.show();
+}
+
+function onPreviewIframeLoaded() {
+  var loader = document.getElementById('previewLoader');
+  var iframe = document.getElementById('previewIframe');
+  if (loader) loader.style.display = 'none';
+  if (iframe) iframe.style.display = 'block';
+}
+
+function printFromPreviewModal() {
+  var iframe = document.getElementById('previewIframe');
+  if (iframe && iframe.contentWindow) {
+    iframe.contentWindow.focus();
+    iframe.contentWindow.print();
+  }
+}
+
+function downloadPdfFromPreviewModal() {
+  var iframe = document.getElementById('previewIframe');
+  if (iframe && iframe.contentWindow && typeof iframe.contentWindow.downloadPDF === 'function') {
+    iframe.contentWindow.downloadPDF();
+  } else if (iframe && iframe.contentWindow) {
+    iframe.contentWindow.focus();
+    iframe.contentWindow.print();
+  }
+}
+
+function confirmDeleteCustomer(id, name) {
+  document.getElementById('deleteCustomerId').value = id;
+  document.getElementById('deleteCustomerName').textContent = name;
+  var modalEl = document.getElementById('deleteCustomerModal');
+  var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+  modal.show();
+}
 </script>
+
+<!-- Delete Customer Modal -->
+<div class="modal fade" id="deleteCustomerModal" tabindex="-1" aria-labelledby="deleteCustomerModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form method="POST" action="customers.php">
+        <input type="hidden" name="delete_customer" value="1">
+        <input type="hidden" name="customer_id" id="deleteCustomerId" value="">
+        <div class="modal-header bg-danger text-white">
+          <h5 class="modal-title" id="deleteCustomerModalLabel"><i class="bi bi-exclamation-triangle-fill me-2"></i> Delete Customer</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p class="mb-2">Are you sure you want to delete customer <strong id="deleteCustomerName" class="text-danger"></strong>?</p>
+          <div class="alert alert-warning small mb-0">
+            <i class="bi bi-info-circle-fill me-1"></i>
+            This will permanently remove this customer and all their ledger transactions. This action cannot be undone.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-danger"><i class="bi bi-trash-fill me-1"></i> Delete Customer</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Print / Download Live Preview Modal -->
+<div class="modal fade" id="printLedgerModal" tabindex="-1" aria-labelledby="printLedgerModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable" style="max-width: 950px;">
+    <div class="modal-content border-0 shadow-lg">
+      <div class="modal-header bg-light py-2 px-3 align-items-center border-bottom">
+        <h5 class="modal-title fs-6 mb-0 text-dark" id="printLedgerModalLabel">
+          <i class="bi bi-file-earmark-text text-primary me-1"></i> 
+          Ledger Preview: <strong id="printModalCustomerName" class="text-primary">-</strong>
+        </h5>
+        <div class="d-flex align-items-center gap-2 ms-auto">
+          <button type="button" class="btn btn-primary btn-sm px-3 shadow-sm" onclick="printFromPreviewModal()">
+            <i class="bi bi-printer-fill me-1"></i> Print
+          </button>
+          <button type="button" class="btn btn-danger btn-sm px-3 shadow-sm" onclick="downloadPdfFromPreviewModal()">
+            <i class="bi bi-file-earmark-pdf-fill me-1"></i> Download PDF
+          </button>
+          <button type="button" class="btn-close ms-1" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+      </div>
+      <div class="modal-body p-0" style="background: #e9ecef; min-height: 520px; position: relative;">
+        <div id="previewLoader" class="text-center py-5 text-secondary">
+          <div class="spinner-border text-primary mb-2" role="status"></div>
+          <div>Loading preview...</div>
+        </div>
+        <iframe id="previewIframe" src="" style="width: 100%; height: 75vh; border: none; display: none; background: #fff;" onload="onPreviewIframeLoaded()"></iframe>
+      </div>
+    </div>
+  </div>
+</div>
 
 <?php require_once __DIR__ . '/includes/footer.php'; ?>
 

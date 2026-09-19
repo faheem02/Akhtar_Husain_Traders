@@ -20,10 +20,19 @@ function sanitize($data) {
 
 function getSetting($key) {
     global $pdo;
-    $stmt = $pdo->prepare("SELECT setting_value FROM settings WHERE setting_key = ?");
-    $stmt->execute([$key]);
-    $row = $stmt->fetch();
-    return $row ? $row['setting_value'] : '';
+    try {
+        $stmt = $pdo->prepare("SELECT setting_value FROM settings WHERE setting_key = ?");
+        $stmt->execute([$key]);
+        $row = $stmt->fetch();
+        if ($row && !empty(trim($row['setting_value']))) {
+            return $row['setting_value'];
+        }
+    } catch (Exception $e) {}
+
+    if ($key === 'company_name') {
+        return 'Sunder Mobile Shop';
+    }
+    return '';
 }
 
 function formatCurrency($amount) {

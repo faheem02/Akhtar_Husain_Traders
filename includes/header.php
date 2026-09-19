@@ -12,21 +12,24 @@ $currentPage = basename($_SERVER['PHP_SELF']);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= $pageTitle ?? $companyName ?></title>
+    <title><?= sanitize($companyName ?: 'Sunder Mobile Shop') ?> - <?= $pageTitle ?? 'Cash Book' ?></title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
-    <link href="assets/css/style.css?v=5" rel="stylesheet">
+    <link href="assets/css/style.css?v=6" rel="stylesheet">
 </head>
 <body>
 
 <div class="main-content" id="mainContent">
     <nav class="topbar no-print">
-        <div class="topbar-date">
+        <div class="topbar-brand">
+            <i class="bi bi-shop text-primary"></i> <?= sanitize($companyName ?: 'Sunder Mobile Shop') ?>
+        </div>
+        <div class="topbar-date d-none d-md-block">
             <i class="bi bi-calendar3"></i> <?= date('l, d M Y') ?>
         </div>
         <div class="topbar-user">
             <i class="bi bi-person-circle"></i> <?= sanitize($_SESSION['username'] ?? 'Admin') ?>
-            <a href="logout.php" class="topbar-logout"><i class="bi bi-box-arrow-right"></i></a>
+            <a href="logout.php" class="topbar-logout" title="Logout"><i class="bi bi-box-arrow-right"></i></a>
         </div>
     </nav>
 

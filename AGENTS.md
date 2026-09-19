@@ -2,7 +2,7 @@
 
 ## Project
 
-Cash book application for "Akhtar Husain Traders". Pure PHP + MySQL (PDO), Bootstrap 5, no framework, no build tools. Currency: PKR.
+Cash book application for "Sunder Mobile Shop". Pure PHP + MySQL (PDO), Bootstrap 5, no framework, no build tools. Currency: PKR.
 
 ## Runtime
 
