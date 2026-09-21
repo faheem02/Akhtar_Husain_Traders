@@ -38,6 +38,7 @@ $net = $running;
 
 $companyName = getSetting('company_name');
 $companyAddress = getSetting('company_address');
+$companyPhone = getSetting('company_phone');
 $isPreview = (isset($_GET['preview']) && $_GET['preview'] === '1');
 
 // Handle CSV Export
@@ -103,8 +104,9 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         }
         .print-header { text-align: center; margin-bottom: 16px; border-bottom: 2px solid #1a5276; padding-bottom: 10px; }
         .company-title { font-size: 1.45rem; font-weight: 800; color: #1a5276; margin-bottom: 2px; }
-        .company-contact { font-size: 0.85rem; color: #555; }
-        .doc-title { font-size: 1rem; font-weight: 700; color: #2c3e50; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 6px; }
+        .company-phone { font-size: 0.88rem; color: #1e293b; font-weight: 600; margin-bottom: 2px; }
+        .company-address { font-size: 0.84rem; color: #64748b; margin-bottom: 4px; }
+        .doc-title { font-size: 0.95rem; font-weight: 700; color: #1a5276; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 6px; }
         
         .customer-info-bar {
             background: #f8fafc;
@@ -209,10 +211,9 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         <div class="ledger-sheet">
             <!-- Print Header -->
             <div class="print-header">
-                <div class="company-title"><?= sanitize($companyName) ?></div>
-                <div class="company-contact">
-                    <?php if (!empty($companyAddress)): ?><?= sanitize($companyAddress) ?><?php endif; ?>
-                </div>
+                <div class="company-title"><?= sanitize($companyName ?: 'Sunder Mobile Shop') ?></div>
+                <div class="company-phone"><?= sanitize($companyPhone ?: '03336453231') ?></div>
+                <div class="company-address"><?= sanitize($companyAddress ?: 'City Plaza, Jam Pur') ?></div>
                 <div class="doc-title">Customer Ledger Statement</div>
             </div>
 

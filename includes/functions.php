@@ -29,10 +29,13 @@ function getSetting($key) {
         }
     } catch (Exception $e) {}
 
-    if ($key === 'company_name') {
-        return 'Sunder Mobile Shop';
-    }
-    return '';
+    return match($key) {
+        'company_name'    => 'Sunder Mobile Shop',
+        'company_address' => 'City Plaza, Jam Pur',
+        'company_phone'   => '03336453231',
+        'currency'        => 'PKR',
+        default           => ''
+    };
 }
 
 function formatCurrency($amount) {

@@ -88,9 +88,9 @@ $companyAddress = getSetting('company_address');
 
     <div class="print-container" style="padding: 20px 30px;">
         <div class="print-header">
-            <h1><?= sanitize($companyName) ?></h1>
-            <div class="phone"><?= sanitize($companyPhone) ?></div>
-            <div class="address"><?= sanitize($companyAddress) ?></div>
+            <h1><?= sanitize($companyName ?: 'Sunder Mobile Shop') ?></h1>
+            <div class="phone"><?= sanitize($companyPhone ?: '03336453231') ?></div>
+            <div class="address"><?= sanitize($companyAddress ?: 'City Plaza, Jam Pur') ?></div>
         </div>
 
         <div class="print-title">CASH BOOK</div>
